@@ -1,0 +1,36 @@
+services:
+  mongo:
+    image: mongo:7.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval
+          "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}) }"
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      MONGODB_DB: climate_analyzer
+      ADMIN_API_TOKEN: dev-admin-token
+      FRONTEND_ORIGIN: "http://localhost:5173"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
