@@ -54,11 +54,28 @@ class Settings(BaseSettings):
     bad_row_ratio_limit: float = 0.05
     ondemand_wait_seconds: int = 8
     response_cache_ttl_s: int = 60
+    # Initial backfill window on POST /regions (DEC-04: 1950 → last full year)
+    initial_backfill_start: str = "1950-01-01"
+    poll_after_seconds: int = 5
 
-    # --- Rate limits (docs/02 §11 — enforced from P3) ---
+    # --- Rate limits (docs/02 §11) ---
     rate_limit_analysis_per_min: int = 60
     rate_limit_region_per_min: int = 10
     rate_limit_admin_per_min: int = 5
+    rate_limit_client_errors_per_min: int = 20
+
+    # --- HTTP layer (docs/02 §8 V-15, §10) ---
+    max_body_bytes: int = 10_240
+    geocode_timeout_s: float = 3.0
+    geocode_count: int = 5
+
+    # --- Scheduler (docs/02 §14.1) ---
+    scheduler_enabled: bool = True
+    scheduler_nightly_hour_utc: int = 2
+    sweeper_interval_minutes: int = 5
+    stale_run_minutes: int = 10
+    max_ingest_attempts: int = 3
+    nightly_lookback_days: int = 400
 
 
 @lru_cache(maxsize=1)

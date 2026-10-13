@@ -143,6 +143,16 @@ class DailyWeatherRepository:
     async def count(self, region_id: str) -> int:
         return await self._col.count_documents({"region_id": region_id})
 
+    async def rows_for_window(
+        self, region_id: str, start_date: str, end_date: str
+    ) -> list[dict[str, Any]]:
+        """Raw daily docs for the inspect drill-down (docs/02 §7.4)."""
+        cursor = self._col.find(
+            {"region_id": region_id, "date": {"$gte": start_date, "$lte": end_date}},
+            {"_id": 0, "date": 1, "tmax_c": 1, "quality": 1},
+        ).sort("date", 1)
+        return await cursor.to_list(length=None)
+
     async def baseline_rows(
         self, region_id: str, start_year: int, end_year: int
     ) -> list[QualityRow]:
@@ -223,6 +233,54 @@ class HazardEventRepository:
     async def count(self, region_id: str, hazard: str) -> int:
         return await self._col.count_documents({"region_id": region_id, "hazard": hazard})
 
+    async def page(
+        self,
+        region_id: str,
+        hazard: str,
+        algo_version: str,
+        start_year: int,
+        end_year: int,
+        *,
+        min_duration: int | None = None,
+        sort_dir: int = -1,
+        skip: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paged event list filtered by algo_version + year (EC-21, TC-I-15)."""
+        query: dict[str, Any] = {
+            "region_id": region_id,
+            "hazard": hazard,
+            "algo_version": algo_version,
+            "year": {"$gte": start_year, "$lte": end_year},
+        }
+        if min_duration is not None:
+            query["duration_days"] = {"$gte": min_duration}
+        total = await self._col.count_documents(query)
+        cursor = (
+            self._col.find(query)
+            .sort([("start_date", sort_dir), ("_id", sort_dir)])
+            .skip(skip)
+            .limit(limit)
+        )
+        return await cursor.to_list(length=None), total
+
+    async def find_by_start(
+        self,
+        region_id: str,
+        hazard: str,
+        algo_version: str,
+        start_date: str,
+    ) -> dict[str, Any] | None:
+        """Event lookup for the inspect drill-down (404 when absent)."""
+        return await self._col.find_one(
+            {
+                "region_id": region_id,
+                "hazard": hazard,
+                "algo_version": algo_version,
+                "start_date": start_date,
+            }
+        )
+
 
 class HazardAnnualRepository:
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
@@ -249,6 +307,46 @@ class HazardAnnualRepository:
 
     async def count(self, region_id: str, hazard: str) -> int:
         return await self._col.count_documents({"region_id": region_id, "hazard": hazard})
+
+    async def rows(
+        self,
+        region_id: str,
+        hazard: str,
+        algo_version: str,
+        start_year: int,
+        end_year: int,
+    ) -> list[dict[str, Any]]:
+        """Annual rows for the requested range (EC-21: filtered by algo_version)."""
+        cursor = self._col.find(
+            {
+                "region_id": region_id,
+                "hazard": hazard,
+                "algo_version": algo_version,
+                "year": {"$gte": start_year, "$lte": end_year},
+            },
+            {"_id": 0, "region_id": 0, "hazard": 0, "algo_version": 0, "data_version": 0},
+        ).sort("year", 1)
+        return await cursor.to_list(length=None)
+
+    async def years(
+        self,
+        region_id: str,
+        hazard: str,
+        algo_version: str,
+        start_year: int,
+        end_year: int,
+    ) -> set[int]:
+        """Years that already have stats — the on-demand gap check (CF-05)."""
+        cursor = self._col.find(
+            {
+                "region_id": region_id,
+                "hazard": hazard,
+                "algo_version": algo_version,
+                "year": {"$gte": start_year, "$lte": end_year},
+            },
+            {"_id": 0, "year": 1},
+        )
+        return {int(doc["year"]) async for doc in cursor}
 
 
 class IngestRunRepository:
@@ -311,3 +409,39 @@ class IngestRunRepository:
         query = {"region_id": region_id} if region_id else {}
         cursor = self._col.find(query).sort("started_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
+
+    async def count(self, region_id: str | None = None) -> int:
+        query = {"region_id": region_id} if region_id else {}
+        return await self._col.count_documents(query)
+
+    async def page(
+        self,
+        *,
+        region_id: str | None = None,
+        skip: int = 0,
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        query = {"region_id": region_id} if region_id else {}
+        cursor = self._col.find(query).sort("started_at", -1).skip(skip).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def fail_stale(self, older_than: str) -> list[dict[str, Any]]:
+        """Sweeper: orphaned ``running`` runs → ``failed_retryable`` (§14.3)."""
+        stale = await self._col.find(
+            {"status": IngestStatus.RUNNING.value, "started_at": {"$lt": older_than}}
+        ).to_list(length=None)
+        for doc in stale:
+            await self._col.update_one(
+                {"_id": doc["_id"]},
+                {
+                    "$set": {
+                        "status": IngestStatus.FAILED_RETRYABLE.value,
+                        "error": {
+                            "code": "RUN_STALE",
+                            "message": "run exceeded the stale threshold; requeued",
+                        },
+                        "finished_at": utcnow(),
+                    }
+                },
+            )
+        return stale

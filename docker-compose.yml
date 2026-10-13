@@ -6,6 +6,13 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    # mongod aborts (WiredTiger EMFILE panic, exit 14) once it hits the
+    # default 1024 fd cap; the integration suite opens a connection per
+    # ephemeral test DB, so lift it to Mongo's recommended 64k.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
       test:
         - CMD-SHELL

@@ -17,6 +17,7 @@ from typing import Any
 
 from pymongo.errors import OperationFailure
 
+from app.core.cache import response_cache
 from app.core.config import Settings, get_settings
 from app.db.repositories import (
     DailyWeatherRepository,
@@ -34,6 +35,7 @@ from app.hazard.pipeline import (
     PipelineContext,
     PipelineOutput,
 )
+from app.hazard.registry import pipeline_for
 from app.models.ingest import IngestStatus, IngestTrigger, Window
 from app.models.region import RegionSpec
 from app.models.weather import QualityRow
@@ -87,20 +89,29 @@ class IngestService:
     # -- public API --------------------------------------------------------
 
     async def run(
-        self, region_id: str, start: date, end: date, trigger: IngestTrigger
+        self,
+        region_id: str,
+        start: date,
+        end: date,
+        trigger: IngestTrigger,
+        *,
+        run_id: Any = None,
     ) -> dict[str, Any]:
         """Ingest ``[start, end]`` for ``region_id``; returns the run summary.
 
         Raises :class:`IngestAlreadyRunning` (single-flight) and the original
         provider error on failure — callers map those to 409/503 (03 §6).
+        ``run_id`` lets a caller that already reserved the single-flight slot
+        (admin recompute returns the id up front) skip re-reservation.
         """
         region = await self.regions.get(region_id)
         if region is None:
             raise LookupError(f"unknown region {region_id}")
 
         window = Window(start=start.isoformat(), end=end.isoformat())
-        async with _region_lock(region_id):
-            run_id = await self.runs.start(region_id, window, trigger)
+        if run_id is None:
+            async with _region_lock(region_id):
+                run_id = await self.runs.start(region_id, window, trigger)
 
         started = time.monotonic()
         try:
@@ -152,6 +163,9 @@ class IngestService:
                 run_id=run_id,
                 started=started,
             )
+            # L2 invalidation: the next GET must re-assemble from the fresh
+            # data_version (docs/02 §10 rule 2, TC-I-13).
+            response_cache.purge_region(region_id)
         except FatalProviderError as exc:
             await self._fail(run_id, region_id, started, IngestStatus.FAILED_FATAL, exc)
             raise
@@ -358,6 +372,56 @@ class IngestService:
             log.exception("could not record ingest failure for %s", region_id)
 
 
+class IngestRunner:
+    """Provider lifecycle for API/scheduler-triggered runs (docs/02 §4).
+
+    Every run owns its provider instance (and closes it when done), so
+    background tasks never share an ``httpx`` client with the request path and
+    a test can swap the whole provider by replacing ``provider_factory``.
+    """
+
+    def __init__(self, db: Any, settings: Settings, provider_factory: Any) -> None:
+        self.db = db
+        self.settings = settings
+        self.provider_factory = provider_factory
+        self.runs = IngestRunRepository(db)
+        self.regions = RegionRepository(db)
+
+    async def reserve(self, region_id: str, start: date, end: date, trigger: IngestTrigger) -> Any:
+        """Take the single-flight slot up front (admin returns the run id)."""
+        if await self.regions.get(region_id) is None:
+            raise LookupError(f"unknown region {region_id}")
+        window = Window(start=start.isoformat(), end=end.isoformat())
+        async with _region_lock(region_id):
+            return await self.runs.start(region_id, window, trigger)
+
+    async def run(
+        self,
+        region_id: str,
+        start: date,
+        end: date,
+        trigger: IngestTrigger,
+        *,
+        run_id: Any = None,
+        hazard: str = "heatwave",
+    ) -> dict[str, Any]:
+        provider = self.provider_factory()
+        try:
+            pipeline = pipeline_for(hazard)
+            service = IngestService(
+                self.db,
+                provider,
+                settings=self.settings,
+                pipeline=pipeline,
+                hazard=hazard,
+            )
+            return await service.run(region_id, start, end, trigger, run_id=run_id)
+        finally:
+            close = getattr(provider, "aclose", None)
+            if close is not None:
+                await close()
+
+
 def check_schema_ratio(rows_in: int, rejected: int, limit: float) -> None:
     """≥5% schema-invalid rows ⇒ the provider is broken (docs/02 §5.6)."""
     if rows_in and rejected / rows_in >= limit:
@@ -372,4 +436,4 @@ def _transactions_unavailable(exc: OperationFailure) -> bool:
     return exc.code in (20, 251) or "transaction numbers" in message
 
 
-__all__ = ["IngestService", "IngestAlreadyRunning", "check_schema_ratio"]
+__all__ = ["IngestAlreadyRunning", "IngestRunner", "IngestService", "check_schema_ratio"]

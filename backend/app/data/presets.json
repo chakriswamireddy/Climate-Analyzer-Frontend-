@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "provenance": "Hand-sourced approximate city coordinates and state bounding boxes from public geographic knowledge, 2026",
+  "presets": [
+    {
+      "id": "city_delhi",
+      "kind": "city",
+      "name": "Delhi",
+      "point": {"lat": 28.6139, "lon": 77.209},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Delhi"}
+    },
+    {
+      "id": "city_mumbai",
+      "kind": "city",
+      "name": "Mumbai",
+      "point": {"lat": 19.076, "lon": 72.8777},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Maharashtra"}
+    },
+    {
+      "id": "city_bengaluru",
+      "kind": "city",
+      "name": "Bengaluru",
+      "point": {"lat": 12.9716, "lon": 77.5946},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Karnataka"}
+    },
+    {
+      "id": "city_hyderabad",
+      "kind": "city",
+      "name": "Hyderabad",
+      "point": {"lat": 17.385, "lon": 78.4867},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Telangana"}
+    },
+    {
+      "id": "city_chennai",
+      "kind": "city",
+      "name": "Chennai",
+      "point": {"lat": 13.0827, "lon": 80.2707},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Tamil Nadu"}
+    },
+    {
+      "id": "city_kolkata",
+      "kind": "city",
+      "name": "Kolkata",
+      "point": {"lat": 22.5726, "lon": 88.3639},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "West Bengal"}
+    },
+    {
+      "id": "city_pune",
+      "kind": "city",
+      "name": "Pune",
+      "point": {"lat": 18.5204, "lon": 73.8567},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Maharashtra"}
+    },
+    {
+      "id": "city_ahmedabad",
+      "kind": "city",
+      "name": "Ahmedabad",
+      "point": {"lat": 23.0225, "lon": 72.5714},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Gujarat"}
+    },
+    {
+      "id": "city_jaipur",
+      "kind": "city",
+      "name": "Jaipur",
+      "point": {"lat": 26.9124, "lon": 75.7873},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Rajasthan"}
+    },
+    {
+      "id": "city_lucknow",
+      "kind": "city",
+      "name": "Lucknow",
+      "point": {"lat": 26.8467, "lon": 80.9462},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Uttar Pradesh"}
+    },
+    {
+      "id": "city_surat",
+      "kind": "city",
+      "name": "Surat",
+      "point": {"lat": 21.1702, "lon": 72.8311},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Gujarat"}
+    },
+    {
+      "id": "city_kanpur",
+      "kind": "city",
+      "name": "Kanpur",
+      "point": {"lat": 26.4499, "lon": 80.3319},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Uttar Pradesh"}
+    },
+    {
+      "id": "city_nagpur",
+      "kind": "city",
+      "name": "Nagpur",
+      "point": {"lat": 21.1458, "lon": 79.0882},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Maharashtra"}
+    },
+    {
+      "id": "city_indore",
+      "kind": "city",
+      "name": "Indore",
+      "point": {"lat": 22.7196, "lon": 75.8577},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Madhya Pradesh"}
+    },
+    {
+      "id": "city_bhopal",
+      "kind": "city",
+      "name": "Bhopal",
+      "point": {"lat": 23.2599, "lon": 77.4126},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Madhya Pradesh"}
+    },
+    {
+      "id": "city_patna",
+      "kind": "city",
+      "name": "Patna",
+      "point": {"lat": 25.5941, "lon": 85.1376},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Bihar"}
+    },
+    {
+      "id": "city_vadodara",
+      "kind": "city",
+      "name": "Vadodara",
+      "point": {"lat": 22.3072, "lon": 73.1812},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Gujarat"}
+    },
+    {
+      "id": "city_coimbatore",
+      "kind": "city",
+      "name": "Coimbatore",
+      "point": {"lat": 11.0168, "lon": 76.9558},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Tamil Nadu"}
+    },
+    {
+      "id": "city_kochi",
+      "kind": "city",
+      "name": "Kochi",
+      "point": {"lat": 9.9312, "lon": 76.2673},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Kerala"}
+    },
+    {
+      "id": "city_guwahati",
+      "kind": "city",
+      "name": "Guwahati",
+      "point": {"lat": 26.1445, "lon": 91.7362},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Assam"}
+    },
+    {
+      "id": "city_bhubaneswar",
+      "kind": "city",
+      "name": "Bhubaneswar",
+      "point": {"lat": 20.2961, "lon": 85.8245},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Odisha"}
+    },
+    {
+      "id": "city_chandigarh",
+      "kind": "city",
+      "name": "Chandigarh",
+      "point": {"lat": 30.7333, "lon": 76.7794},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Chandigarh"}
+    },
+    {
+      "id": "city_amritsar",
+      "kind": "city",
+      "name": "Amritsar",
+      "point": {"lat": 31.634, "lon": 74.8723},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Punjab"}
+    },
+    {
+      "id": "city_varanasi",
+      "kind": "city",
+      "name": "Varanasi",
+      "point": {"lat": 25.3176, "lon": 82.9739},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Uttar Pradesh"}
+    },
+    {
+      "id": "city_mysuru",
+      "kind": "city",
+      "name": "Mysuru",
+      "point": {"lat": 12.2958, "lon": 76.6394},
+      "provider_meta": {"source": "curated", "country_code": "IN", "admin1": "Karnataka"}
+    },
+    {
+      "id": "state_andhra_pradesh",
+      "kind": "state",
+      "name": "Andhra Pradesh",
+      "bbox": [12.6, 76.7, 19.2, 84.9],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_assam",
+      "kind": "state",
+      "name": "Assam",
+      "bbox": [24.7, 89.7, 27.9, 96.0],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_bihar",
+      "kind": "state",
+      "name": "Bihar",
+      "bbox": [24.2, 83.4, 27.5, 88.1],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_chhattisgarh",
+      "kind": "state",
+      "name": "Chhattisgarh",
+      "bbox": [17.8, 80.2, 24.1, 84.4],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_gujarat",
+      "kind": "state",
+      "name": "Gujarat",
+      "bbox": [20.05, 68.1, 24.8, 74.6],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_karnataka",
+      "kind": "state",
+      "name": "Karnataka",
+      "bbox": [11.6, 74.0, 18.5, 78.6],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_kerala",
+      "kind": "state",
+      "name": "Kerala",
+      "bbox": [8.0, 74.8, 12.75, 77.4],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_madhya_pradesh",
+      "kind": "state",
+      "name": "Madhya Pradesh",
+      "bbox": [21.1, 74.0, 27.0, 82.9],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_maharashtra",
+      "kind": "state",
+      "name": "Maharashtra",
+      "bbox": [15.6, 72.6, 22.1, 81.0],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_odisha",
+      "kind": "state",
+      "name": "Odisha",
+      "bbox": [17.7, 81.4, 22.6, 87.6],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_rajasthan",
+      "kind": "state",
+      "name": "Rajasthan",
+      "bbox": [23.0, 69.5, 30.2, 78.2],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    },
+    {
+      "id": "state_tamil_nadu",
+      "kind": "state",
+      "name": "Tamil Nadu",
+      "bbox": [8.05, 76.0, 13.6, 80.4],
+      "provider_meta": {"source": "curated", "country_code": "IN"}
+    }
+  ]
+}

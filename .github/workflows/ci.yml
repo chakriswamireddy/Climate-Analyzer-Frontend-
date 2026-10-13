@@ -44,7 +44,7 @@ jobs:
         run: ruff format --check .
       - name: Tests
         working-directory: backend
-        # P1: unit + integration against the real replica set (docs/04 §9).
+        # P3: full unit + integration suite against the real replica set (docs/04 §9).
         run: pytest -q
 
   frontend:

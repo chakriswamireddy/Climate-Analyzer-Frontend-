@@ -73,13 +73,15 @@
   - 📝 Judgment calls (all documented in module docstrings): (1) `degraded_grid` days are assessable for thresholds/detection/coverage — a partial grid still carries a real areal mean (02 §5.2/§5.6, DEC-10); (2) the spec's month fallback is a subset of the ±30 window on the 365-day calendar, so it is kept verbatim but only reachable via `MIN_SAMPLES` policy changes; (3) with no threshold cache *and* no baseline rows, ingest writes daily rows only (honest empty output) rather than fabricating thresholds from a partial window; (4) `calendar_doy`'s Feb 29 fold was corrected (previously returned 60, colliding with Mar 1 in leap years — now folds to 59 per 02 §5.1).
 
 ### P3 — API layer (~1.5–2 h) — deps: P2
-- ⬜ Routers: hazards, regions (presets/search/create/status), analysis (timeseries/summary/events/inspect), admin, healthz/readyz (02 §7)
-- ⬜ Curated presets file `backend/app/data/presets.json` (25 cities as points, 12 states as bboxes — list in 02 §7.3)
-- ⬜ Validation models (V-01..V-16) + error envelope + request-id middleware (02 §7.2, §8)
-- ⬜ L2/L3 caching + ETag (02 §10); rate limiter (02 §11); CORS + security headers (05 §1.2)
-- ⬜ APScheduler jobs + sweeper (02 §14)
-- ⬜ TC-I-01..20 green
+- ✅ Routers: hazards, regions (presets/search/create/status), analysis (timeseries/summary/events/inspect), admin, healthz/readyz (02 §7)
+- ✅ Curated presets file `backend/app/data/presets.json` (25 cities as points, 12 states as bboxes — list in 02 §7.3)
+- ✅ Validation models (V-01..V-16) + error envelope + request-id middleware (02 §7.2, §8)
+- ✅ L2/L3 caching + ETag (02 §10); rate limiter (02 §11); CORS + security headers (05 §1.2)
+- ✅ APScheduler jobs + sweeper (02 §14)
+- ✅ TC-I-01..20 green
 - **DoD:** OpenAPI at `/docs` matches 02 §7; full integration suite green against real Mongo; rate-limit + ETag verifiable via curl.
+  - ✅ Verified 2026-10-13: `ruff check`/`format --check` clean, `REQUIRE_MONGO=1 pytest` 193 passed (53 integration + 51 new unit; full TC-I-01..20 incl. single-flight create, on-demand backfill EC-05/CF-05, L2 purge on ingest, paged events EC-21, sweeper TC-I-18, rate-limit TC-I-11, admin auth TC-I-12, dead-Mongo TC-I-14; unit TC-U-11/18/25). OpenAPI `/openapi.json` lists exactly the 16 routes of 02 §7.1 (incl. root + `/api/v1` health probes) and `/docs` serves 200. curl transcript: `GET /healthz` → 200 + `cache-control: no-store` + `x-trace-id`; `GET /api/v1/regions/presets` & `/api/v1/hazards` → strong ETag, `If-None-Match` → 304; 61× `/api/v1/hazards` → 60× 200 then 429 `RATE_LIMITED` with `Retry-After: 1`, `X-RateLimit-Limit: 60`, CORS `Access-Control-Allow-Origin` on the 429, probes unlimited; admin without/wrong token → 401, correct → 200; 20 KB body → 413 `BAD_REQUEST`; V-01/V-05/V-16 violations → 422 envelope with `details.field`; unknown region → 404 `REGION_NOT_FOUND`. Modules: `app/core/{trace,errors,middleware,ratelimit,cache,deps}.py`, `app/models/api.py`, `app/hazard/registry.py`, `app/providers/geocoding.py`, `app/services/{analysis,presets,scheduler,tasks}.py`, `app/routers/*` (6), `app/data/presets.json` (25 city + 12 state = 37).
+  - 📝 Judgment calls: (1) presets bypass the 25 deg² V-06 area cap — curated state boxes ship in-repo and are trusted (02 §7.3); (2) `ApiMiddleware` sits *inside* `CORSMiddleware` so 429/413 responses still carry `Access-Control-Allow-Origin`; (3) the rate limiter is in-process per DEC-13 (resets on redeploy, no cross-instance aggregation); (4) on-demand backfill (CF-05) waits up to `ondemand_wait_seconds` then returns 504 while the background run continues — never blocks a worker for a full backfill.
 
 ### P4 — Frontend core (~2–2.5 h) — deps: P3 (needs live API)
 - ⬜ App shell + react-query setup + URL param sync (shareable analysis links)
