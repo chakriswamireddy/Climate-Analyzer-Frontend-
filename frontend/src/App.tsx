@@ -118,6 +118,7 @@ export default function App() {
       )}
       {hazards && (
         <section className="controls" aria-label="Analysis controls">
+          <RegionSelector onCreated={handleCreated} />
           <div className="controls__row">
             <HazardSelector
               items={hazards.items}
@@ -147,7 +148,6 @@ export default function App() {
               </button>
             </div>
           </div>
-          <RegionSelector onCreated={handleCreated} />
         </section>
       )}
       {hazards && (

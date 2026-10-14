@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   BarElement,
   CategoryScale,
@@ -26,10 +27,45 @@ const METRICS: { id: ChartMetric; button: string; axis: string }[] = [
   { id: 'mean_exceedance', button: 'Intensity (°C)', axis: 'Mean exceedance above threshold (°C)' },
 ]
 
-const COLOR_BAR = '#0072B2'
-const COLOR_LOW = '#E69F00'
-const COLOR_ROLLING = '#D55E00'
-const COLOR_OLS = '#3d3d3d'
+/** Thermal bars in heat red, weak years as the same heat washed out, trend
+ * lines in cool teal/ink so they never read as "more heat". */
+const PALETTE_LIGHT = {
+  bar: '#C1440E',
+  barLow: 'rgba(193, 68, 14, 0.32)',
+  rolling: '#0E7C86',
+  ols: '#3d3d3d',
+  grid: '#D7DCE2',
+  tick: '#59656F',
+}
+const PALETTE_DARK = {
+  bar: '#E07A4E',
+  barLow: 'rgba(224, 122, 78, 0.32)',
+  rolling: '#45B5BE',
+  ols: '#9AA7B2',
+  grid: '#2A353E',
+  tick: '#98A5B1',
+}
+
+function prefersDark(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+}
+
+function usePalette() {
+  const [dark, setDark] = useState(prefersDark)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    if (typeof query.addEventListener !== 'function') return
+    const onChange = () => setDark(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  return dark ? PALETTE_DARK : PALETTE_LIGHT
+}
 
 export interface TimeSeriesChartProps {
   series: SeriesRow[]
@@ -54,11 +90,12 @@ export function TimeSeriesChart({
   startYear,
   endYear,
 }: TimeSeriesChartProps) {
+  const palette = usePalette()
   const axis = METRICS.find((entry) => entry.id === metric)?.axis ?? metric
   const labels = series.map((row) => String(row.year))
   const values = series.map((row) => (row.coverage_pct > 0 ? row[metric] : null))
   const colors = series.map((row) =>
-    row.coverage_pct > 0 && row.coverage_pct < 80 ? COLOR_LOW : COLOR_BAR,
+    row.coverage_pct > 0 && row.coverage_pct < 80 ? palette.barLow : palette.bar,
   )
 
   const rollingByYear = new Map(rolling.values.map((entry) => [entry.year, entry.value]))
@@ -82,8 +119,8 @@ export function TimeSeriesChart({
             type: 'line' as const,
             label: `${rolling.window}-year rolling mean`,
             data: series.map((row) => rollingByYear.get(row.year) ?? null),
-            borderColor: COLOR_ROLLING,
-            backgroundColor: COLOR_ROLLING,
+            borderColor: palette.rolling,
+            backgroundColor: palette.rolling,
             borderWidth: 2,
             pointRadius: 0,
             tension: 0.25,
@@ -97,8 +134,8 @@ export function TimeSeriesChart({
             type: 'line' as const,
             label: 'OLS trend',
             data: series.map((row) => ols.intercept! + ols.slope_per_year * row.year),
-            borderColor: COLOR_OLS,
-            backgroundColor: COLOR_OLS,
+            borderColor: palette.ols,
+            backgroundColor: palette.ols,
             borderDash: [6, 4],
             borderWidth: 1.5,
             pointRadius: 0,
@@ -112,16 +149,30 @@ export function TimeSeriesChart({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { position: 'bottom' },
+      legend: {
+        position: 'bottom',
+        labels: {
+          color: palette.tick,
+          boxWidth: 14,
+          boxHeight: 8,
+          padding: 14,
+          font: { size: 11 },
+        },
+      },
       tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.formattedValue}` } },
     },
     scales: {
       y: {
         beginAtZero: true,
-        title: { display: true, text: axis },
-        ticks: { precision: metric === 'mean_exceedance' ? 1 : 0 },
+        grid: { color: palette.grid, drawTicks: false },
+        ticks: { precision: metric === 'mean_exceedance' ? 1 : 0, color: palette.tick, padding: 6 },
+        title: { display: true, text: axis, color: palette.tick, padding: { top: 8 } },
       },
-      x: { title: { display: true, text: 'Year' } },
+      x: {
+        grid: { display: false, drawTicks: false },
+        ticks: { color: palette.tick, padding: 6 },
+        title: { display: true, text: 'Year', color: palette.tick, padding: { top: 8 } },
+      },
     },
   }
 
@@ -133,7 +184,7 @@ export function TimeSeriesChart({
       ? `OLS trend ${slope > 0 ? '+' : ''}${slope} days/decade (p=${ols.p_value}).`
       : null,
     series.length < 2 ? 'Trend needs at least 2 years of data.' : null,
-    'Years below 80% coverage are shaded orange; missing years are gaps, not zeros.',
+    'Years below 80% coverage are shaded pale; missing years are gaps, not zeros.',
   ]
     .filter(Boolean)
     .join(' ')

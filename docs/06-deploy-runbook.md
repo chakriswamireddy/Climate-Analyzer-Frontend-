@@ -16,6 +16,8 @@ Companion to [`05 §2 P6`](./05-security-and-implementation-checklist.md) and [`
 | `VITE_API_BASE_URL` set on Vercel | ✅ | set to the Render origin, then `vercel deploy --prod` (alias re-pointed 2026-10-14) |
 | UptimeRobot on `/readyz` | ⬜ owner action | config below (§5) — owner creates the monitor in their account; README marks it pending |
 | Cold-start copy in FE | ✅ | `ColdStartCard` (`frontend/src/components/states.tsx`), TC-F-11 |
+| Cold-start spot check (live) | ✅ 2026-10-14 | 15 min idle → first `/healthz` **22.9 s** (200), subsequent 0.5 s — §7.1 row 8 |
+| UI redesign ("instrument ledger") | ✅ 2026-10-14 | `frontend/src/index.css` rewritten: Newsreader + IBM Plex Sans, cool-grey ground, petrol-teal actions, thermal colour reserved for the data (summary rule + heat bars); Region first, then Hazard/Period. Pinned selectors/texts unchanged — 11 unit + 8 Playwright green, lint/build clean |
 | CF-01..07 walkthrough | ✅ 2026-10-14 | §7.1 results table + §7.2 latency; `scripts/cf-smoke.mjs <render-url>` → 29 green / 1 env-blocked (EC-31), burst rate-limit 48×200 + 72×429 verified separately |
 | EC-34 ETag weak-comparison fix | ✅ 2026-10-14 | found on the live URL (gzip → `W/"…"` → `200` instead of `304`); `middleware.py::_matches` + TC-U-28/TC-I-22; suite 214 green |
 | EC-35 + EC-36 (CF-05 on the live URL) | ✅ 2026-10-14 | current-year window clamped to today (`ingest.run`) + coverage recomputed from stored years (`coverage_extent`); CF-05 now `200` in 8.4 s; TC-I-23/TC-I-24; commits `e6ec488` (backend repo) |
@@ -113,7 +115,7 @@ Record results against CF-01..07 on the deployed URL:
 | 5 | CF-05 on-demand backfill | ✅ 2026-10-14 | `start=2025&end=2026&include_current_year=true` on `r_4ff4af333ad67ec1` → on-demand run → `200` in 8.4 s, `data_version` bumped to `dv_2`, coverage `…–2026`, honest `suppressed_low_coverage` caveat (2026 is 78 % complete). Reached only after **EC-35** (future `end_date` → fatal `400`) and **EC-36** (partial window replaced coverage) were found and fixed from this very check |
 | 6 | CF-06 provider failure | ✅ (observed live) | the bbox region above: `failed` + `INGEST_RETRY_EXHAUSTED` + resubmit guidance, API stayed 200 on `/healthz`/`/readyz` (matches TC-N-05) |
 | 7 | CF-07 empty range | ✅ | 1950–1951 → 200, `totals.events == 0`, `headline_kind: no_change`, zero-filled rows, no `NaN`/`Infinity` |
-| 8 | Cold start | ⬜ | requires ~15 min of idle (Render sleep); FE card covered by TC-F-11 |
+| 8 | Cold start | ✅ 2026-10-14 | 14 min idle → first `/healthz` `200` in **22.9 s**, second 0.5 s, `/readyz` 0.6 s (probe at 17:42 UTC). Matches DEC-14's ≤60 s budget; the FE `ColdStartCard` covers the wait (TC-F-11) |
 | 9 | Rate limit | ✅ | 120-request burst → 48×200 + 72×429; 429 body `{code: RATE_LIMITED, retryable: true, retry_after_seconds: 1}` with `Retry-After: 1`, `X-RateLimit-Limit: 60`, `X-RateLimit-Remaining: 0`; `/healthz` unaffected |
 
 **EC-34 (found here, fixed in P6):** on the deployed URL the origin sits behind Cloudflare, which downgrades our strong `"…"` ETag to the weak `W/"…"` *whenever it gzip-encodes* (brotli passes it through, which is why `fetch`/Chrome saw `304` while `curl` saw `200`). `If-None-Match` must use the **weak** comparison (RFC 9110 §13.1.2), so `middleware.py::_matches` now compares opaque tags (strip `W/` + quotes). Local suites passed before and after; regression tests TC-U-28 + TC-I-22. Verification on the deployed URL: `If-None-Match: W/"<etag>"` → `304` empty body, wrong tag → `200`.
