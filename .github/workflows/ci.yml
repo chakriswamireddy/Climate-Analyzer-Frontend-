@@ -62,6 +62,10 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+      - name: Tests
+        working-directory: frontend
+        # P4: TC-F-01..09 + no-console-error guard (docs/04 §4).
+        run: npm test
       - name: Typecheck + build
         working-directory: frontend
         run: npm run build
