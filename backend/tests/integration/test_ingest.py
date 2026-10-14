@@ -7,7 +7,7 @@ with respx; the database is real (docs/04 §9).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import httpx
 import pytest
@@ -198,3 +198,65 @@ async def test_grid_region_ingests_via_areal_mean(mongo_db, settings) -> None:
     assert doc["tmax_c"] is not None
     region = await mongo_db["regions"].find_one({"_id": region_id})
     assert region["status"] == "ready"
+
+
+@respx.mock
+async def test_window_is_clamped_to_the_archive_horizon(mongo_db, settings) -> None:
+    """EC-35: a current-year window stops at today, not Dec 31.
+
+    Open-Meteo rejects a future ``end_date`` with 400 and a non-429 4xx is a
+    :class:`FatalProviderError`, so the unclamped window turned CF-05's
+    on-demand backfill for 2026 into a 502 "unusable data" (found live in P6).
+    """
+    today = datetime.now(UTC).date()
+    end_of_year = date(today.year, 12, 31)
+    payload = open_meteo_payload(make_readings(START, today))
+    route = respx.get(ARCHIVE_URL).mock(return_value=httpx.Response(200, json=payload))
+    region_id, _ = await RegionBuilder(mongo_db).ensure(kind="city", name="Hyderabad", spec=POINT)
+
+    service = _service(mongo_db, settings)
+    try:
+        summary = await service.run(region_id, START, end_of_year, IngestTrigger.CLI)
+    finally:
+        await service.provider.aclose()
+
+    assert summary["status"] == IngestStatus.SUCCESS.value
+    assert route.call_count == 1
+    params = route.calls[0].request.url.params
+    assert params["start_date"] == START.isoformat()
+    assert params["end_date"] == today.isoformat()  # never past the archive horizon
+
+    region = await mongo_db["regions"].find_one({"_id": region_id})
+    assert region["status"] == "ready"
+    assert region["coverage"]["end_year"] == today.year
+    last = await mongo_db["daily_weather"].find_one({"region_id": region_id}, sort=[("date", -1)])
+    assert last["date"] == today.isoformat()
+
+
+@respx.mock
+async def test_fully_future_window_records_honest_noop_success(mongo_db, settings) -> None:
+    """EC-35: nothing fetchable → no provider call, run succeeds, no writes.
+
+    ``ensure_ready`` then sees the years still missing and serves the EC-12
+    partial instead of a fatal 502 (CF-05 failure path).
+    """
+    route = respx.get(ARCHIVE_URL).mock(return_value=httpx.Response(200, json={}))
+    region_id, _ = await RegionBuilder(mongo_db).ensure(kind="city", name="Hyderabad", spec=POINT)
+
+    service = _service(mongo_db, settings)
+    try:
+        summary = await service.run(
+            region_id, date(2030, 1, 1), date(2030, 12, 31), IngestTrigger.CLI
+        )
+    finally:
+        await service.provider.aclose()
+
+    assert summary["status"] == IngestStatus.SUCCESS.value
+    assert summary["counts"] == {}
+    assert route.call_count == 0
+    assert await mongo_db["daily_weather"].count_documents({"region_id": region_id}) == 0
+
+    run = await mongo_db["ingest_runs"].find_one({"region_id": region_id})
+    assert run["status"] == IngestStatus.SUCCESS.value
+    assert run["error"] is None
+    assert run["finished_at"] is not None

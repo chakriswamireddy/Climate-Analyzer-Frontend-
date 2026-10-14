@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from pymongo.errors import OperationFailure
@@ -124,8 +124,30 @@ class IngestService:
 
         started = time.monotonic()
         try:
+            # EC-35: the archive's calendar stops at "today", so a window past
+            # it (a current-year on-demand range is Jan 1 .. Dec 31) is refused
+            # with 400 — a ProviderClientError, i.e. fatal — and CF-05 answers
+            # 502 "unusable data" instead of preparing. Clamp to the years that
+            # can exist; when the whole window is still ahead of us, record an
+            # honest no-op success so the caller serves the EC-12 partial for
+            # years the source genuinely does not have yet.
+            window_start, window_end = start, min(end, datetime.now(UTC).date())
+            if window_start > window_end:
+                duration_ms = int((time.monotonic() - started) * 1000)
+                await self.runs.finish(run_id, status=IngestStatus.SUCCESS, duration_ms=duration_ms)
+                return {
+                    "run_id": str(run_id),
+                    "region_id": region_id,
+                    "status": IngestStatus.SUCCESS.value,
+                    "counts": {},
+                    "attempts": 1,
+                    "data_version": region.get("data_version"),
+                    "duration_ms": duration_ms,
+                }
+            window = Window(start=window_start.isoformat(), end=window_end.isoformat())
+
             spec = RegionSpec.model_validate(region["spec"])
-            fetch = await self.provider.fetch_daily(spec, start, end)
+            fetch = await self.provider.fetch_daily(spec, window_start, window_end)
             check_schema_ratio(
                 fetch.rows_in, fetch.rows_rejected, self.settings.bad_row_ratio_limit
             )

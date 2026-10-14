@@ -82,6 +82,7 @@
 | TC-I-20 | Algo bump recompute | bump `ALGO_VERSION` | old stats ignored (versioned keys); recompute produces new rows; API serves new algo_version |
 | TC-I-21 | Single-flight loser inherits failure | 2 parallel cold GETs, provider fails, 0% of the range present | both → 504 `TIMEOUT` retryable + `retry_after_seconds: 5`; runs all `failed_retryable`; nothing degraded cached (EC-33) |
 | TC-I-22 | Weak ETag echo (CDN re-encode) | same GET with `If-None-Match: W/"…"` — the form Cloudflare returns whenever it gzip-encodes our strong `"…"` | 304 + empty body (RFC 9110 §13.1.2 weak comparison); a weak tag for a *different* representation still → 200 (EC-34) |
+| TC-I-23 | Ingest window past the archive horizon | on-demand window `2018-01-01 … Dec 31 of the current year` (clamped to today) and a fully future window `2030` | provider is called with `end_date = today`, never a future date; a fully future window makes **no** provider call, records a `success` run and writes nothing (EC-35) |
 
 ---
 
@@ -176,6 +177,7 @@
 | EC-32 retry-budget exhaustion (P5 fix) | TC-I-18 sweeper variant (`test_sweeper_marks_exhausted_region_failed`, `test_sweeper_budget_resets_when_region_resubmitted`, `test_sweeper_leaves_live_run_alone`), TC-N-05 |
 | EC-33 joined run failure serves degraded 200 (P5 fix) | TC-I-21 (`test_joined_run_failure_answers_504_not_degraded_200`), cf05 e2e (`frontend/e2e/cf05.spec.ts`) |
 | EC-34 CDN downgrades strong ETag to weak `W/"…"` (P6 fix) | TC-I-22 (`test_etag_304_for_cdn_weak_form`), TC-U-28 (`tests/unit/test_middleware.py`) |
+| EC-35 current-year window reaches past the archive horizon → fatal 400 on CF-05 (P6 fix) | TC-I-23 (`test_window_is_clamped_to_the_archive_horizon`, `test_fully_future_window_records_honest_noop_success`) |
 
 ---
 
