@@ -231,15 +231,27 @@ def _set(headers: dict[str, bytes], order: list[str], name: str, value: bytes) -
     headers[name] = value
 
 
+def _opaque(tag: str) -> str:
+    """RFC 9110 §8.8.3 entity-tag: drop the weakness prefix and the quotes."""
+    value = tag.strip()
+    if value.startswith("W/"):
+        value = value[2:]
+    return value.strip('"')
+
+
 def _matches(if_none_match: str, etag: str) -> bool:
+    """``If-None-Match`` uses the **weak** comparison function (RFC 9110 §13.1.2),
+    so ``W/"…"`` still matches our strong ``"…"``. That form is what a CDN
+    re-encoder returns: Cloudflare downgrades the ETag whenever it gzip-encodes
+    the response (brotli passes it through unchanged), so without this the
+    deployed API answers 200 to every browser/proxy that echoes its ETag back."""
     if not if_none_match:
         return False
     candidates = [part.strip() for part in if_none_match.split(",")]
-    return (
-        "*" in candidates
-        or etag in candidates
-        or etag.strip("W/") in {item.strip('W/"') for item in candidates}
-    )
+    if "*" in candidates:
+        return True
+    target = _opaque(etag)
+    return any(candidate and _opaque(candidate) == target for candidate in candidates)
 
 
 def _client_ip(request: Request) -> str:

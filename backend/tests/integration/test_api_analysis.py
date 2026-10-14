@@ -200,6 +200,30 @@ async def test_etag_enables_304_on_repeat(client, mongo_db) -> None:
     assert other.headers["etag"] != etag
 
 
+async def test_etag_304_for_cdn_weak_form(client, mongo_db) -> None:
+    """EC-34: the CDN downgrades the strong ETag to ``W/"…"`` on gzip, so the
+    browser/proxy echoes the weak form back — If-None-Match is a weak
+    comparison (RFC 9110 §13.1.2) and must still answer 304."""
+    region_id = await seed_region(mongo_db, years=range(1990, 2021))
+    params = {"region_id": region_id, "start_year": 1990, "end_year": 2020}
+
+    first = await client.get(TIMESERIES, params=params)
+    assert first.status_code == 200
+    etag = first.headers["etag"]
+
+    weak = etag if etag.startswith("W/") else f"W/{etag}"
+    second = await client.get(TIMESERIES, params=params, headers={"If-None-Match": weak})
+    assert second.status_code == 304
+    assert second.content == b""
+
+    # a weak tag for a *different* representation still misses
+    other = await client.get(
+        TIMESERIES, params={**params, "start_year": 1991}, headers={"If-None-Match": weak}
+    )
+    assert other.status_code == 200
+    assert other.headers["etag"] != etag
+
+
 async def test_l2_cache_serves_hit_on_repeat(client, mongo_db) -> None:
     region_id = await seed_region(mongo_db, years=range(1990, 2021))
     params = {"region_id": region_id, "start_year": 1990, "end_year": 2020}

@@ -52,6 +52,7 @@
 | TC-U-25 | Rate limiter bucket | 61 requests in a minute (fake clock) | first 60 pass; 61st 429 with Retry-After |
 | TC-U-26 | Weighted quota pacing | 3 decade chunks with minute budget 50 (fake clock) + weight formula | 2 chunks sent immediately, 3rd waits for the next window; weight = `locations × max(1, (vars/10) × (days/30))` matches live calibration (1 loc/10 y/3 vars ≈ 36.5) |
 | TC-U-27 | Provider 429 classification | 429 then 200 (window fits budget); 429 body naming an hourly limit; 429 whose wait exceeds the chunk budget | sleep-and-retry succeeds; hourly/daily → fail fast with `retry after HH:MM`; over-budget wait → retryable failure after exactly 1 attempt |
+| TC-U-28 | If-None-Match weak comparison | strong `"x"`, weak `W/"x"`, `*`, mixed list, wrong tag, empty header, partial/unquoted tag | match only when the RFC 9110 opaque tags are equal after dropping `W/` and quotes (EC-34) |
 
 ---
 
@@ -80,6 +81,7 @@
 | TC-I-19 | Partial coverage response | provider gap year in range | 200 with caveat + `coverage_pct` <100; charts data flagged; TC-E-06 consumes |
 | TC-I-20 | Algo bump recompute | bump `ALGO_VERSION` | old stats ignored (versioned keys); recompute produces new rows; API serves new algo_version |
 | TC-I-21 | Single-flight loser inherits failure | 2 parallel cold GETs, provider fails, 0% of the range present | both → 504 `TIMEOUT` retryable + `retry_after_seconds: 5`; runs all `failed_retryable`; nothing degraded cached (EC-33) |
+| TC-I-22 | Weak ETag echo (CDN re-encode) | same GET with `If-None-Match: W/"…"` — the form Cloudflare returns whenever it gzip-encodes our strong `"…"` | 304 + empty body (RFC 9110 §13.1.2 weak comparison); a weak tag for a *different* representation still → 200 (EC-34) |
 
 ---
 
@@ -173,6 +175,7 @@
 | EC-31 shared-IP provider quota | TC-U-26, TC-U-27 (+ P1 DoD CLI backfill against the live API) |
 | EC-32 retry-budget exhaustion (P5 fix) | TC-I-18 sweeper variant (`test_sweeper_marks_exhausted_region_failed`, `test_sweeper_budget_resets_when_region_resubmitted`, `test_sweeper_leaves_live_run_alone`), TC-N-05 |
 | EC-33 joined run failure serves degraded 200 (P5 fix) | TC-I-21 (`test_joined_run_failure_answers_504_not_degraded_200`), cf05 e2e (`frontend/e2e/cf05.spec.ts`) |
+| EC-34 CDN downgrades strong ETag to weak `W/"…"` (P6 fix) | TC-I-22 (`test_etag_304_for_cdn_weak_form`), TC-U-28 (`tests/unit/test_middleware.py`) |
 
 ---
 
