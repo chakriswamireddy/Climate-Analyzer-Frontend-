@@ -21,8 +21,15 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.tsx'],
-    // unit suite only: live checks run via `npm run test:live`.
-    exclude: [...configDefaults.exclude, 'src/test/live-render.test.tsx'],
+    // unit suite only: live checks run via `npm run test:live`, browser E2E via
+    // `npm run test:e2e` (playwright specs must never be collected by vitest).
+    exclude: [
+      ...configDefaults.exclude,
+      'src/test/live-render.test.tsx',
+      'e2e/**',
+      'test-results/**',
+      'playwright-report/**',
+    ],
     restoreMocks: true,
     unstubGlobals: true,
   },

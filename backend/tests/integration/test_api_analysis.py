@@ -1,5 +1,5 @@
 """Analysis endpoints — TC-I-07..TC-I-10, TC-I-13, TC-I-15, TC-I-16,
-TC-I-19, TC-I-20 (docs/04 §3; flows CF-04/CF-05; EC-12/EC-21).
+TC-I-19..TC-I-21 (docs/04 §3; flows CF-04/CF-05; EC-12/EC-21).
 
 Reads are served from precomputed stats; the provider is only ever touched
 by the CF-05 on-demand path, which these tests drive deliberately.
@@ -15,6 +15,7 @@ import pytest
 
 from app.main import create_app
 from app.models.api import last_full_year
+from app.providers.base import RetryableProviderError
 from app.services.region import RegionBuilder
 from tests.integration.conftest import HYDERABAD, invalid_cases, seed_region, settle
 
@@ -377,6 +378,43 @@ async def test_on_demand_timeout_504_while_run_continues(
     app.state.settings.ondemand_wait_seconds = 30
     retry = await client.get(TIMESERIES, params=params)
     assert retry.status_code == 200, retry.text
+
+
+async def test_joined_run_failure_answers_504_not_degraded_200(
+    client, mongo_db, provider_factory, app
+) -> None:
+    """TC-I-21 / CF-05: a single-flight loser inherits the winner's *failure*.
+
+    The winner's on-demand run dies on a provider error while a second GET is
+    joined onto it. 0% of the requested years exist, so the EC-12 rule (<80%)
+    requires 504 retryable for *both* callers — never a 200 body assembled
+    from the gap: the FE would stop polling and render a suppressed panel that
+    the restored data never reaches (found live while running cf05.spec.ts).
+    """
+    region_id = await _empty_ready_region(mongo_db)
+    app.state.settings.ondemand_wait_seconds = 8
+    provider_factory.state["delay"] = 0.3
+    provider_factory.state["fail"] = RetryableProviderError("provider down")
+    params = {"region_id": region_id, "start_year": 2016, "end_year": 2020}
+
+    responses = await asyncio.gather(*(client.get(SUMMARY, params=params) for _ in range(2)))
+
+    statuses = [response.status_code for response in responses]
+    assert statuses == [504, 504], [response.text for response in responses]
+    for response in responses:
+        error = response.json()["error"]
+        assert error["code"] == "TIMEOUT"
+        assert error["retryable"] is True
+        assert error["retry_after_seconds"] == 5
+
+    await settle()
+    runs = await mongo_db["ingest_runs"].find({"region_id": region_id}).to_list(None)
+    assert runs, "the losing caller must not invent a run"
+    assert {run["status"] for run in runs} == {"failed_retryable"}
+
+    # the gap must not have been cached as a degraded body either
+    again = await client.get(SUMMARY, params=params)
+    assert again.status_code == 504, again.text
 
 
 async def test_region_backfilling_is_409_with_retry_after(client, mongo_db) -> None:

@@ -17,6 +17,8 @@
 
 **Fixtures:** synthetic daily series generator (`tests/fixtures/series_factory.py`) producing known heatwave patterns (isolated 3-day streak, 2-day near-miss, gap-split streak, year-crossing streak, outlier spike, all-missing year).
 
+**CI smoke (API-level), implemented P5:** the backend CI job (`.github/workflows/ci.yml`) seeds a deterministic ready region offline (`backend/scripts/seed_smoke_region.py` — direct stats insert, no provider, immune to EC-31) and runs `scripts/api-smoke.mjs` (18 checks: healthz/readyz, hazard registry, presets, region read + 404 envelope, summary/timeseries/events with NaN guard + ETag 304 + rate-limit headers, 422 envelopes, beacon 202/422). Browser E2E stays best-effort: `npm run test:e2e` (Playwright, TC-E-01..07 + CF-05 poll UX).
+
 ---
 
 ## 2. Unit Test Matrix (Backend, pure logic)
@@ -77,6 +79,7 @@
 | TC-I-18 | Sweep orphaned run | run stuck `running` older than 10 min | sweeper → `failed_retryable`; re-enqueued |
 | TC-I-19 | Partial coverage response | provider gap year in range | 200 with caveat + `coverage_pct` <100; charts data flagged; TC-E-06 consumes |
 | TC-I-20 | Algo bump recompute | bump `ALGO_VERSION` | old stats ignored (versioned keys); recompute produces new rows; API serves new algo_version |
+| TC-I-21 | Single-flight loser inherits failure | 2 parallel cold GETs, provider fails, 0% of the range present | both → 504 `TIMEOUT` retryable + `retry_after_seconds: 5`; runs all `failed_retryable`; nothing degraded cached (EC-33) |
 
 ---
 
@@ -129,6 +132,8 @@
 | TC-N-07 | Transaction atomicity | inject failure after events insert | abort → no visible events/stats for window |
 | TC-N-08 | Bundle sanity | FE build size | initial JS < 300 KB gz (charts lazy-ok) |
 
+**Tooling note (P5):** k6/locust unavailable in this environment → TC-N-01..05 executed with dependency-free equivalents: TC-N-01 respx + `test_http_client_carries_configured_timeouts`; TC-N-02 `scripts/fuzz-inputs.mjs` (150k req/60 s); TC-N-03 `scripts/bench-read.mjs` (20 concurrent clients, dedicated uvicorn with raised `RATE_LIMIT_ANALYSIS_PER_MIN` per 02 §15); TC-N-04 `scripts/burst-limit.mjs`; TC-N-05 live EC-31 provider outage + 18 failure-path tests. Results table: 05 §P5. TC-N-06..08 are outside §9's `TC-N-01..05` criterion (tracked under the 05 security pass).
+
 ---
 
 ## 7. Edge-Case → Test Mapping
@@ -146,7 +151,7 @@
 | EC-09 antimeridian/edges | TC-I-09 |
 | EC-10 malformed region_id | TC-I-09 |
 | EC-11 degraded grid | TC-I-19 (grid variant) |
-| EC-12 provider partial | TC-I-16, TC-E-09 |
+| EC-12 provider partial | TC-I-16, TC-I-21, TC-E-09 |
 | EC-13 zero baseline | TC-U-15 |
 | EC-14 DST | TC-U-12 (date-only) |
 | EC-15 current year | TC-I-09 |
@@ -166,6 +171,8 @@
 | EC-29 single-year chart | TC-F-03 |
 | EC-30 no storage | TC-F-01 in private mode (manual) |
 | EC-31 shared-IP provider quota | TC-U-26, TC-U-27 (+ P1 DoD CLI backfill against the live API) |
+| EC-32 retry-budget exhaustion (P5 fix) | TC-I-18 sweeper variant (`test_sweeper_marks_exhausted_region_failed`, `test_sweeper_budget_resets_when_region_resubmitted`, `test_sweeper_leaves_live_run_alone`), TC-N-05 |
+| EC-33 joined run failure serves degraded 200 (P5 fix) | TC-I-21 (`test_joined_run_failure_answers_504_not_degraded_200`), cf05 e2e (`frontend/e2e/cf05.spec.ts`) |
 
 ---
 

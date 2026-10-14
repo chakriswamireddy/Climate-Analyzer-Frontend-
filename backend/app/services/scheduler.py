@@ -11,7 +11,10 @@ without waiting for cron/interval triggers.
 * ``sweep_stale_runs`` (every ``sweeper_interval_minutes``): runs orphaned
   for > ``stale_run_minutes`` → ``failed_retryable``; regions stuck
   ``backfilling`` with no live run and attempts budget left are re-enqueued
-  (EC-18, TC-I-18).
+  (EC-18, TC-I-18); a region whose backfilling episode has burned through
+  ``max_ingest_attempts`` consecutive failed runs is marked ``failed`` with an
+  honest ``last_error`` so the user can re-submit it (02 §14.2,
+  03 CF-06 postcondition "region honestly failed").
 
 ``last_heartbeat`` feeds ``GET /readyz`` (§7.1 Mongo ping + heartbeat).
 """
@@ -29,7 +32,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import Settings
 from app.db.repositories import IngestRunRepository, RegionRepository, utcnow
-from app.models.ingest import IngestTrigger
+from app.models.ingest import IngestStatus, IngestTrigger
 from app.services.ingest import IngestAlreadyRunning, IngestRunner
 from app.services.tasks import spawn
 
@@ -126,14 +129,27 @@ class SchedulerService:
         cutoff = _iso_before(self.settings.stale_run_minutes)
         stale = await self.runs.fail_stale(cutoff)
         requeued: list[str] = []
+        failed: list[str] = []
         for region in await self._regions_with_status("backfilling"):
             region_id = region["_id"]
             if await self.runs.get_running(region_id) is not None:
                 continue  # live run — nothing to sweep
-            recent = await self.runs.recent(region_id, limit=1)
-            attempts = int(recent[0].get("attempts", 0)) if recent else 0
-            if attempts >= self.settings.max_ingest_attempts:
+            recent = await self.runs.recent(region_id, limit=self.settings.max_ingest_attempts + 1)
+            if self._budget_exhausted(recent, region):
                 log.warning("region %s exhausted its retry budget", region_id)
+                await self.regions.set_status(
+                    region_id,
+                    "failed",
+                    error={
+                        "code": "INGEST_RETRY_EXHAUSTED",
+                        "message": (
+                            "backfill failed after "
+                            f"{self.settings.max_ingest_attempts} attempts; "
+                            "re-submit the region to retry"
+                        ),
+                    },
+                )
+                failed.append(region_id)
                 continue
             start, end = self._requeue_window(recent)
             spawn(
@@ -141,21 +157,50 @@ class SchedulerService:
                 name=f"sweep:{region_id}",
             )
             requeued.append(region_id)
-        if stale or requeued:
+        if stale or requeued or failed:
             log.info(
-                "sweeper: %d stale run(s) failed, %d region(s) requeued",
+                "sweeper: %d stale run(s) failed, %d region(s) requeued, "
+                "%d region(s) marked failed",
                 len(stale),
                 len(requeued),
+                len(failed),
             )
         return {
             "stale_runs": [str(doc["_id"]) for doc in stale],
             "requeued_regions": requeued,
+            "failed_regions": failed,
         }
+
+    def _budget_exhausted(self, recent: list[dict[str, Any]], region: dict[str, Any]) -> bool:
+        """True when this backfilling episode has no retry budget left (§14.2).
+
+        Counts consecutive finished ``failed_*`` runs started since the region
+        entered ``backfilling`` (``updated_at`` bumps exactly on that
+        transition — ``ensure``/``set_status`` — so an earlier failed lifecycle
+        or a nightly failure on a previously-ready region cannot starve a
+        fresh re-submitted backfill). ``max_ingest_attempts`` (3) failures in
+        the current episode → the region must honestly become ``failed``.
+        """
+        episode_start = (
+            region.get("updated_at") or region.get("created_at") or "0000-00-00T00:00:00Z"
+        )
+        failures = 0
+        for run in recent:
+            if str(run.get("started_at", "")) < episode_start:
+                break  # belongs to an earlier lifecycle of this region
+            status = run.get("status")
+            if status == IngestStatus.SUCCESS.value:
+                break
+            if status in (IngestStatus.FAILED_RETRYABLE.value, IngestStatus.FAILED_FATAL.value):
+                failures += 1
+        return failures >= self.settings.max_ingest_attempts
 
     # -- helpers ------------------------------------------------------------
 
     async def _regions_with_status(self, status: str) -> list[dict[str, Any]]:
-        cursor = self.db["regions"].find({"status": status}, {"_id": 1, "spec": 1})
+        cursor = self.db["regions"].find(
+            {"status": status}, {"_id": 1, "spec": 1, "updated_at": 1, "created_at": 1}
+        )
         return await cursor.to_list(length=None)
 
     def _requeue_window(self, recent: list[dict[str, Any]]) -> tuple[date, date]:

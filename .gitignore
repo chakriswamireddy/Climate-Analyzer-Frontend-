@@ -32,3 +32,7 @@ dist/
 
 # Logs
 *.log
+
+# Playwright (frontend E2E)
+test-results/
+playwright-report/

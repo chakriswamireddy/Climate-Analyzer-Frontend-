@@ -52,15 +52,24 @@ from app.services.quality import quality_pipeline
 
 log = logging.getLogger(__name__)
 
-_locks: dict[str, asyncio.Lock] = {}
+_locks: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
 
 
 def _region_lock(region_id: str) -> asyncio.Lock:
-    """Short-lived: held only while reserving the run slot, never during fetch."""
-    lock = _locks.get(region_id)
-    if lock is None:
-        lock = _locks.setdefault(region_id, asyncio.Lock())
-    return lock
+    """Short-lived: held only while reserving the run slot, never during fetch.
+
+    Cached per (region, running loop): an ``asyncio.Lock`` is bound to the loop
+    that first *waited* on it, so reusing one from another loop raises
+    ``"bound to a different event loop"`` for every later waiter. Production
+    runs a single loop (identity holds → one lock per region, as before); tests
+    and any multi-loop embedder get a fresh lock per loop instead of a 500.
+    """
+    loop = asyncio.get_running_loop()
+    cached = _locks.get(region_id)
+    if cached is None or cached[0] is not loop:
+        cached = (loop, asyncio.Lock())
+        _locks[region_id] = cached
+    return cached[1]
 
 
 class IngestService:

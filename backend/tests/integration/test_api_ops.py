@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.main import create_app
-from app.models.region import point_spec
 from app.services.scheduler import SchedulerService
 from tests.integration.conftest import ADMIN_TOKEN, seed_region, settle
 
@@ -233,15 +232,36 @@ async def test_sweeper_fails_stale_run_and_requeues_region(
     assert total == 2, "requeued run must have been recorded and finished"
 
 
-async def test_sweeper_leaves_live_run_and_exhausted_region_alone(
-    mongo_db, api_settings, provider_factory
+async def _failed_run(
+    mongo_db,
+    region_id: str,
+    *,
+    minutes_ago: int,
+    status: str = "failed_retryable",
+    attempts: int = 1,
 ) -> None:
-    """Live runs survive; retry budget exhausted → no requeue (EC-18)."""
-    scheduler = SchedulerService(mongo_db, api_settings, provider_factory=provider_factory)
-    live_region = await seed_region(mongo_db, years=range(2016, 2021), status="backfilling")
     await mongo_db["ingest_runs"].insert_one(
         {
-            "region_id": live_region,
+            "region_id": region_id,
+            "window": {"start": "2016-01-01", "end": "2020-12-31"},
+            "status": status,
+            "attempts": attempts,
+            "trigger": "on_demand",
+            "counts": {},
+            "error": {"code": "PROVIDER_5XX", "message": "upstream 500"},
+            "started_at": _iso_ago(minutes_ago),
+            "finished_at": _iso_ago(minutes_ago - 1),
+        }
+    )
+
+
+async def test_sweeper_leaves_live_run_alone(mongo_db, api_settings, provider_factory) -> None:
+    """A live run must not be failed or requeued by the sweeper (EC-18)."""
+    scheduler = SchedulerService(mongo_db, api_settings, provider_factory=provider_factory)
+    region_id = await seed_region(mongo_db, years=range(2016, 2021), status="backfilling")
+    await mongo_db["ingest_runs"].insert_one(
+        {
+            "region_id": region_id,
             "window": {"start": "2016-01-01", "end": "2020-12-31"},
             "status": "running",
             "attempts": 1,
@@ -252,39 +272,68 @@ async def test_sweeper_leaves_live_run_and_exhausted_region_alone(
             "finished_at": None,
         }
     )
-    exhausted = await seed_region(
-        mongo_db,
-        years=range(2016, 2021),
-        status="backfilling",
-        name="Exhausted",
-        # region ids are derived from the spec (DEC-23), so a second
-        # region needs its own geography or both seeds collide.
-        spec=point_spec(19.076, 72.8777),
-    )
-    await mongo_db["ingest_runs"].insert_one(
-        {
-            "region_id": exhausted,
-            "window": {"start": "2016-01-01", "end": "2020-12-31"},
-            "status": "failed_retryable",
-            "attempts": api_settings.max_ingest_attempts,
-            "trigger": "on_demand",
-            "counts": {},
-            "error": {"code": "X", "message": "y"},
-            "started_at": _iso_ago(2),
-            "finished_at": _iso_ago(1),
-        }
-    )
 
     result = await scheduler.sweep_stale_runs()
 
     assert result["stale_runs"] == []
     assert result["requeued_regions"] == []
-    running = await mongo_db["ingest_runs"].find_one(
-        {"region_id": live_region, "status": "running"}
-    )
+    running = await mongo_db["ingest_runs"].find_one({"region_id": region_id, "status": "running"})
     assert running is not None, "a live run must not be failed by the sweeper"
-    region = await mongo_db["regions"].find_one({"_id": live_region})
+    region = await mongo_db["regions"].find_one({"_id": region_id})
     assert region["status"] == "backfilling"
+
+
+async def test_sweeper_marks_exhausted_region_failed(
+    mongo_db, api_settings, provider_factory
+) -> None:
+    """TC-I-18: ``max_ingest_attempts`` failed runs in one backfilling episode
+    → region ``failed`` + honest ``last_error``, no further requeue (02 §14.2,
+    03 CF-06 "region honestly failed")."""
+    scheduler = SchedulerService(mongo_db, api_settings, provider_factory=provider_factory)
+    region_id = await seed_region(mongo_db, years=range(2016, 2021), status="backfilling")
+    episode_start = _iso_ago(30)
+    await mongo_db["regions"].update_one(
+        {"_id": region_id}, {"$set": {"updated_at": episode_start}}
+    )
+    for offset in range(api_settings.max_ingest_attempts):
+        await _failed_run(mongo_db, region_id, minutes_ago=20 - 5 * offset)
+
+    result = await scheduler.sweep_stale_runs()
+
+    assert result["requeued_regions"] == []
+    assert result["failed_regions"] == [region_id]
+    region = await mongo_db["regions"].find_one({"_id": region_id})
+    assert region["status"] == "failed"
+    assert region["last_error"]["code"] == "INGEST_RETRY_EXHAUSTED"
+    assert "re-submit" in region["last_error"]["message"]
+    await settle()
+    running = await mongo_db["ingest_runs"].find_one({"region_id": region_id, "status": "running"})
+    assert running is None, "an exhausted region must not be requeued"
+
+
+async def test_sweeper_budget_resets_when_region_resubmitted(
+    mongo_db, api_settings, provider_factory
+) -> None:
+    """Re-POSTing a failed region starts a fresh backfilling episode: failures
+    from the previous lifecycle must not count against the new budget (02 §14.2
+    ``failed → POST → backfilling``)."""
+    scheduler = SchedulerService(mongo_db, api_settings, provider_factory=provider_factory)
+    region_id = await seed_region(mongo_db, years=range(2016, 2021), status="backfilling")
+    old_episode = _iso_ago(60)
+    await mongo_db["regions"].update_one({"_id": region_id}, {"$set": {"updated_at": old_episode}})
+    for offset in range(api_settings.max_ingest_attempts):
+        await _failed_run(mongo_db, region_id, minutes_ago=50 - 5 * offset)
+
+    # user re-submits the same spec → status backfilling bumps updated_at
+    await mongo_db["regions"].update_one({"_id": region_id}, {"$set": {"updated_at": _iso_ago(1)}})
+
+    result = await scheduler.sweep_stale_runs()
+
+    assert result["failed_regions"] == []
+    assert result["requeued_regions"] == [region_id]
+    await settle()
+    region = await mongo_db["regions"].find_one({"_id": region_id})
+    assert region["status"] == "ready", "fresh episode must be requeued, not starved"
 
 
 async def test_sweeper_requeues_backfilling_region_with_no_run(

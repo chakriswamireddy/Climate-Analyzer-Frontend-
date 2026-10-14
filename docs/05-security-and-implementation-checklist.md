@@ -84,20 +84,43 @@
   - 📝 Judgment calls: (1) presets bypass the 25 deg² V-06 area cap — curated state boxes ship in-repo and are trusted (02 §7.3); (2) `ApiMiddleware` sits *inside* `CORSMiddleware` so 429/413 responses still carry `Access-Control-Allow-Origin`; (3) the rate limiter is in-process per DEC-13 (resets on redeploy, no cross-instance aggregation); (4) on-demand backfill (CF-05) waits up to `ondemand_wait_seconds` then returns 504 while the background run continues — never blocks a worker for a full backfill.
 
 ### P4 — Frontend core (~2–2.5 h) — deps: P3 (needs live API)
-- ⬜ App shell + react-query setup + URL param sync (shareable analysis links)
-- ⬜ RegionSelector (search + manual bbox), HazardSelector (default heatwave), RangePicker (validated)
-- ⬜ AnalysisPanel with loading/empty/error/partial states (03 §5)
-- ⬜ SummaryCard (headline + caveats), TimeSeriesChart (Chart.js; metric toggle; rolling overlay), EventsTable (pagination)
-- ⬜ Methodology tooltip + a11y text summaries
-- ⬜ TC-F-01..09 green
+- ✅ App shell + react-query setup + URL param sync (shareable analysis links)
+- ✅ RegionSelector (search + manual bbox), HazardSelector (default heatwave), RangePicker (validated)
+- ✅ AnalysisPanel with loading/empty/error/partial states (03 §5)
+- ✅ SummaryCard (headline + caveats), TimeSeriesChart (Chart.js; metric toggle; rolling overlay), EventsTable (pagination)
+- ✅ Methodology tooltip + a11y text summaries
+- ✅ TC-F-01..09 green
 - **DoD:** CF-01..04, CF-07 manual script passes against staging API; no console errors.
+  - ✅ Verified 2026-10-13: `npm test` → 9 passed (TC-F-01..09; vitest + jsdom + Testing Library, fixtures/mocks in `frontend/src/test/`); `npm run lint`, `tsc --noEmit`, `npm run build`, `prettier --check` all clean; CI runs `npm test` between lint and build.
+  - ✅ No console errors (M-05): `frontend/src/test/setup.tsx` fails any test that triggers `console.error`; green for all 9 tests and all 4 live-render checks.
+  - ✅ Live API script: `node scripts/cf-smoke.mjs` against local `docker compose up` → **30 passed, 0 failed, 1 blocked** — CF-01 defaults/trace_id/404-clear, CF-02 search→POST→idempotent repeat→`ready` (coverage 1950–2025), CF-03 create/idempotency/V-06/V-16 rejections, CF-04 identical `data_version`, warm 18 ms avg (<300 ms NFR-03), ETag `304`, 422/404 failure envelopes, CF-07 zero-event window `no_change` + zero-filled series + `NaN|Infinity`-free payload.
+  - ⚠️ 1 blocked (environment, EC-31): the bbox region's grid backfill cannot complete while the shared campus egress IP is 429'd by Open-Meteo (direct probe returns 429) — re-run `node scripts/cf-smoke.mjs` when the quota window resets; everything else in CF-03 verified.
+  - ✅ Live FE render: `npm run test:live` → 4 passed (real App + react-query + fetch against the local API: CF-01 defaults, CF-04 summary/charts/events render, CF-07 EmptyState, 404 → CF-01 copy, tampered URL blocked client-side). Run after `docker compose up -d`; chart canvas mocked (jsdom has no canvas — real canvas check is browser-side/P5).
+  - ✅ P5 bug bar input (found during live CF-03, **fixed in P5**): after `max_ingest_attempts` (3) of `failed_retryable`, the sweeper only logged “exhausted its retry budget” and the region stayed `backfilling` forever, violating docs/02 §14.2 (`backfilling → failed`) and 03 CF-06 (“region honestly failed”). Fixed in `backend/app/services/scheduler.py::sweep_stale_runs`: the sweeper now counts consecutive failed runs **within the current backfilling episode** (`region.updated_at`, bumped on every `backfilling` transition) and marks the region `failed` with `last_error.code = INGEST_RETRY_EXHAUSTED` + re-submit guidance; a fresh `POST /regions` starts a new episode so old failures never starve a retry. Tests: `test_sweeper_marks_exhausted_region_failed`, `test_sweeper_budget_resets_when_region_resubmitted` (and `test_sweeper_leaves_live_run_alone`) in `backend/tests/integration/test_api_ops.py` → 13 passed.
+  - ✅ **Continuation pass 2026-10-13** — the full P4 gate was re-run after P5 landed and found **4 defects**, all fixed and re-verified:
+    1. **CI red (`npm test`):** vitest also collected the Playwright specs (`e2e/*.spec.ts`) once P5 added them → 2 failed files / 9 passed. `frontend/vite.config.ts` now excludes `e2e/**`, `test-results/**`, `playwright-report/**` (unit suite = `src/**` only; live checks stay behind `npm run test:live`, browser suite behind `npm run test:e2e`).
+    2. **`prettier --check` red:** `e2e/helpers.ts` was unformatted and Playwright's `test-results/.last-run.json` was being scanned → formatted + `.prettierignore` entries (`test-results/`, `playwright-report/`).
+    3. **cf05 e2e 1/8 red → EC-33 (backend, CF-05/EC-12):** `analysis.py::ensure_ready` did `exc = None` after losing the single-flight race, so a *failed* joined run served a degraded `200 suppressed_low_coverage` for a gap below the 80% floor (spec: `504 TIMEOUT` retryable). The FE — correctly — stopped polling, so restored data never appeared (live repro: 2/3 concurrent GETs answered `200`). Fixed by adopting the joined run's recorded outcome (`_joined_failure`); `test_joined_run_failure_answers_504_not_degraded_200` (TC-I-21) went `[504, 200]` → `[504, 504]`.
+    4. **Latent 500:** `ingest.py::_region_lock` cached one `asyncio.Lock` per region across event loops, so the second waiter in a fresh loop raised *"bound to a different event loop"* → `INTERNAL_ERROR` (surfaced as the `[504, 500]` variant of defect 3). Locks are now cached per (region, running loop); single-loop production behaviour is unchanged.
+    - Re-verified after the fixes: `npm test` **9 passed**, `npm run lint`, `tsc --noEmit`, `npm run build`, `prettier --check` clean; `npm run test:live` **4 passed**; `npm run test:e2e` **8/8 passed (28.7 s)** incl. cf05; backend `ruff check`/`ruff format --check` clean + `REQUIRE_MONGO=1 pytest` **197 passed** (TC-I-01..21).
 
 ### P5 — Integration hardening (~1 h) — deps: P3+P4
-- ⬜ CF-05 on-demand path end-to-end (409-poll UX)
-- ⬜ TC-E-01..09 executed (Playwright or recorded manual)
-- ⬜ TC-N-01..05 run; fix blockers
-- ⬜ Bug bar: no open P0/P1 defects
-- **DoD:** 04 §9 completion criteria met.
+- ✅ CF-05 on-demand path end-to-end (409-poll UX)
+  - **API-level** (live Mongo backup/restore of `r_4ff4af333ad67ec1` stats): (a) years 1990–2010 removed → analysis answers `504 TIMEOUT`, `retryable: true`, `retry_after_seconds: 5`, message "Data preparation failed — please retry"; run `failed_retryable` with the honest provider error; region stays `ready`; identical across 3 sequential polls and 2 concurrent GETs (no pile-up). (b) partial restore (28/31 years, coverage 90%) → `200` with caveat "Low data coverage in year(s) 2018, 2019, 2020…". Stats restored afterwards (backup: `/tmp/opencode/cf05-stats-backup.json`).
+  - **Browser**: `frontend/e2e/cf05.spec.ts` — PreparingCard shows "Polling every 5 s", data restored mid-poll → summary-card + headline within 60 s. 1/1 passed.
+- ✅ TC-E-01..07 executed — Playwright **8/8 in ~20 s** (`npm run test:e2e`, chromium, workers:1, webServer :5173): E-01 preset→ready→headline+charts+request order; E-02 bbox POST→PreparingCard + grid caveat footer; E-03 range change refetch, no duplicate region POST; E-04 metric toggle `aria-pressed` + `chart-summary` text; E-05 zero-event EmptyState (CF-07); E-06 `coverage_pct=50` → DataQuality panel, no summary-card (CF-12); E-07 invalid URL params → error-card + Reset, zero analysis requests; plus cf05 poll UX (above). TC-E-08 (offline banner) / TC-E-09 (mocked 503 backfill) **not executed** — beyond 04 §9's `TC-E-01..07` criterion. *(Re-run 2026-10-13 after the EC-33 fix: **8/8 in 28.7 s**, cf05 included — it had been 1/8 red while the join path served a degraded `200`.)*
+- ✅ TC-N-01..05 run — no blockers; results table (recorded in PR at submit):
+
+  | ID | Result | Evidence |
+  |---|---|---|
+  | TC-N-01 | PASS | `pytest tests/unit/test_provider.py` → 16 passed: configured timeouts (`test_http_client_carries_configured_timeouts`, new), retry budget ≤3 attempts, Retry-After honored, fatal 4xx no-retry, invalid input → no outbound (`test_api_analysis.py` provider `calls == []`) — all respx-mocked |
+  | TC-N-02 | PASS | `node scripts/fuzz-inputs.mjs http://localhost:8000 60` → **150,000 hostile requests/60 s**; histogram 200/201/202/404/405/413/422/429 (+4×503 geocode = CF-02 spec'd degradation, EC-31); **0 unhandled 5xx, 0 hangs** (10 s hang threshold); 4xx error envelopes intact |
+  | TC-N-03 | PASS | `node scripts/bench-read.mjs http://127.0.0.1:8001 60 20` (own uvicorn, `RATE_LIMIT_ANALYSIS_PER_MIN=1000000` per 02 §15; k6 unavailable → dependency-free equivalent): 24,175 ok / 0 errors; p50 48.7 / p90 67.7 / **p95 75.0 ms** / p99 92.0 / max 132 ms — NFR-03 (<300 ms) met |
+  | TC-N-04 | PASS | `node scripts/burst-limit.mjs http://localhost:8000 500` → exactly 60×200 + 440×429; all 429s carry `retry-after` + `x-ratelimit-limit: 60` + `remaining: 0` + `RATE_LIMITED` envelope; `healthz` 200 after burst |
+  | TC-N-05 | PASS | Provider outage live all session (EC-31): analysis/backfill runs → `failed_retryable`, scheduler retries then region honestly `failed`/`INGEST_RETRY_EXHAUSTED`; API stayed up (`healthz`/`readyz` 200); 18 failure-path tests green (`pytest -k "fail or retry or breaker or provider or quota or stale or budget or resume"`); DB-down covered by `test_db_down_still_answers_healthz_and_503s_everything_else` |
+- ✅ CI API-level smoke (04 §1 requires it): `backend/scripts/seed_smoke_region.py` (deterministic ready region + 31 years stats, **offline — no provider**) + `scripts/api-smoke.mjs` (**18 checks**: healthz/readyz, hazard registry, presets, region read + 404 envelope, summary/timeseries/events with NaN guard + ETag `304` + rate-limit headers, 422 envelopes, beacon 202/422) wired into `.github/workflows/ci.yml` backend job. Verified locally **18/18**, including a clean-room fresh-DB + fresh-uvicorn run.
+- ✅ Bug bar: no open P0/P1 defects — **4 defects found this cycle, all fixed** (1) sweeper retry-budget exhaustion → region `failed` + `INGEST_RETRY_EXHAUSTED`, tests + live proof on `r_c47e7a34fd6c1fec`; (2) missing bbox grid caveat in FE; (3) single-flight loser serving a degraded `200` for a sub-80% gap → **EC-33**, TC-I-21 + cf05 e2e; (4) loop-bound `_region_lock` cache → `INTERNAL_ERROR` for the second waiter in a new event loop. Remaining: EC-31 Open-Meteo 429 from campus IP (environment, documented; all resulting paths are spec'd degradations).
+- **DoD:** 04 §9 met — TC-U/TC-I green in CI (real Mongo; TC-I-01..21, 197 backend tests), TC-F green in CI, TC-E-01..07 + cf05 executed and re-run green **8/8 (28.7 s)** after the EC-33 fix, TC-N-01..05 results table above, new ECs (EC-32, EC-33) added to 03 §4 + mapped in 04 §7.
 
 ### P6 — Deploy & deliverables (~1 h) — deps: P5
 - ⬜ Atlas M0 + Render backend + Vercel frontend; env vars set (02 §15); secrets never in repo

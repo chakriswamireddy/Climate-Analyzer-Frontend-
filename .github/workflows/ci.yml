@@ -46,6 +46,26 @@ jobs:
         working-directory: backend
         # P3: full unit + integration suite against the real replica set (docs/04 §9).
         run: pytest -q
+      - name: Seed smoke region (offline, no provider — docs/04 §1)
+        working-directory: backend
+        id: seed
+        run: |
+          REGION_ID=$(python scripts/seed_smoke_region.py)
+          echo "region_id=$REGION_ID" >> "$GITHUB_OUTPUT"
+      - name: Start API for smoke
+        working-directory: backend
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API failed to start" >&2
+          exit 1
+      - name: API smoke (docs/04 §1, P5)
+        run: node scripts/api-smoke.mjs http://127.0.0.1:8000 "${{ steps.seed.outputs.region_id }}"
 
   frontend:
     runs-on: ubuntu-latest

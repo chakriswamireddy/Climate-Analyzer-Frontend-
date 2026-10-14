@@ -12,6 +12,9 @@ Responsibilities:
      continues (TC-I-16; §7.2);
    * another caller's run owns the window and outlives the budget →
      ``409 REGION_NOT_READY`` (poll /regions/{id});
+   * another caller's run *failed* → its failure is adopted here, so a gap
+     below the 80% floor still answers ``504`` instead of a degraded ``200``
+     (CF-05 failure paths; TC-I-21);
    * provider failure → ≥80% of requested years present ⇒ honest partial
      (EC-12), otherwise mapped onto the §7.2 catalog (503 circuit open,
      502 fatal, 504 retryable);
@@ -45,7 +48,7 @@ from app.db.repositories import (
 )
 from app.hazard.trends import ROLLING_MIN_PERIODS, ROLLING_WINDOW, analyze, rolling_mean
 from app.models.api import AnalysisQuery, EventsQuery, InspectQuery
-from app.models.ingest import IngestTrigger
+from app.models.ingest import IngestStatus, IngestTrigger
 from app.models.weather import Quality, calendar_doy
 from app.providers.base import (
     CircuitOpenError,
@@ -231,7 +234,11 @@ class AnalysisService:
                     "Another analysis is already preparing this data",
                     retry_after_seconds=self.settings.poll_after_seconds,
                 )
-            exc = None
+            # The winner's outcome is ours: only a run that *succeeded* may
+            # downgrade to an honest partial. A failed one keeps the failure so
+            # the ≥80% rule below answers 504 instead of a degraded 200 built
+            # from the gap (CF-05 failure paths / EC-12; TC-I-21).
+            exc = await self._joined_failure(region["_id"])
 
         refreshed = await self.regions.get(region["_id"]) or region
         still = await self._missing_years(refreshed["_id"], hazard, start_year, end_year)
@@ -245,6 +252,27 @@ class AnalysisService:
         if (total - len(still)) / total >= 0.8:
             return refreshed  # ≥80% present → partial body + caveats (EC-12)
         raise self._map_failure(exc)
+
+    async def _joined_failure(self, region_id: str) -> BaseException | None:
+        """Outcome of the run we lost the single-flight race to.
+
+        ``None`` only when that run ended ``success`` (its missing years are
+        then the source's, and the caller gets an honest partial). Anything
+        else — ``failed_retryable``, ``failed_fatal``, or a run that never
+        reached a terminal state — is returned as a provider error so
+        :meth:`ensure_ready` maps it through the ≥80%/504 rule below.
+        """
+        runs = await self.runner.runs.recent(region_id, limit=1)
+        if not runs:
+            return RetryableProviderError("on-demand backfill did not run")
+        run = runs[0]
+        if run.get("status") == IngestStatus.SUCCESS.value:
+            return None
+        error = run.get("error") or {}
+        message = error.get("message") or "on-demand backfill failed"
+        if run.get("status") == IngestStatus.FAILED_FATAL.value:
+            return FatalProviderError(message)
+        return RetryableProviderError(message)
 
     async def _missing_years(
         self, region_id: str, hazard: str, start_year: int, end_year: int

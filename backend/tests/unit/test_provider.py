@@ -298,3 +298,17 @@ async def test_hourly_429_fails_fast_with_resume_hint(settings) -> None:
     assert excinfo.value.retryable is True
     assert "hourly quota" in str(excinfo.value)
     assert "retry after" in str(excinfo.value)
+
+
+async def test_http_client_carries_configured_timeouts(settings) -> None:
+    """TC-N-01: outbound client timeouts come from settings (docs/02 §15) —
+    never httpx defaults — so a hung provider cannot pin a request forever."""
+    provider = OpenMeteoProvider(settings)
+    try:
+        timeout = (await provider._get_client()).timeout
+    finally:
+        await provider.aclose()
+
+    assert timeout.read == settings.provider_timeout_s
+    assert timeout.write == settings.provider_timeout_s
+    assert timeout.connect == settings.provider_connect_timeout_s

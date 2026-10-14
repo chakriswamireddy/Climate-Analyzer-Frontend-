@@ -38,6 +38,7 @@ def _service(db, settings) -> IngestService:
     return IngestService(db, provider, settings=settings)
 
 
+@respx.mock
 async def test_real_pipeline_persists_thresholds_then_reuses_cache(mongo_db, settings) -> None:
     respx.get(ARCHIVE_URL).mock(return_value=httpx.Response(200, json=_payload()))
     region_id, _ = await RegionBuilder(mongo_db).ensure(kind="city", name="Hyderabad", spec=POINT)
