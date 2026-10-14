@@ -1,0 +1,26 @@
+# Render blueprint (docs/06-deploy-runbook.md, DEC-14).
+# "Sync repo" in Render → New → Blueprint picks this file up.
+services:
+  - type: web
+    name: climate-analyzer-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # /readyz = Mongo ping + scheduler heartbeat, so Render only routes traffic
+    # when the service can actually answer (02 §7.1).
+    healthCheckPath: /readyz
+    autoDeploy: true
+    envVars:
+      - key: MONGODB_URI
+        sync: false # paste the Atlas connection string in the dashboard
+      - key: MONGODB_DB
+        value: climate_analyzer
+      - key: ADMIN_API_TOKEN
+        generateValue: true # rotate: openssl rand -hex 32
+      - key: FRONTEND_ORIGIN
+        value: https://climate-analyzer-seven.vercel.app
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FORMAT
+        value: json

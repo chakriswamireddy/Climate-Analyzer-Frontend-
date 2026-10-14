@@ -55,6 +55,16 @@ export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 404 || error.code === 'REGION_NOT_FOUND')
 }
 
+/** Deployed free tier sleeps after idle: the first request either cannot be
+ * connected at all (status 0) or comes back as 503 while the service boots.
+ * Both are indistinguishable from a cold start at the client, so the UI names
+ * it and keeps polling instead of showing a dead-end error. A 500 with a real
+ * envelope stays a normal error (TC-F-04). */
+export function isColdStartError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false
+  return error.isNetwork || error.status === 503 || error.code === 'SERVICE_UNAVAILABLE'
+}
+
 export function retryOn(failureCount: number, error: unknown): boolean {
   if (failureCount >= 3) return false
   if (!(error instanceof ApiError)) return failureCount < 3

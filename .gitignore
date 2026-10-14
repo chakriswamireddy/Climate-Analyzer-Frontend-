@@ -36,3 +36,6 @@ dist/
 # Playwright (frontend E2E)
 test-results/
 playwright-report/
+
+# Vercel (local link metadata — created by `vercel deploy`)
+.vercel/

@@ -5,10 +5,10 @@ import {
   QUERY_KEYS,
   cancelStaleAnalysis,
   canonicalQuery,
+  isColdStartError,
   isNotFoundError,
   isPreparingError,
   isRateLimitError,
-  retryOn,
 } from '../lib/queries'
 import type { AnalysisParams } from '../lib/urlParams'
 import type { FieldError } from '../lib/validation'
@@ -21,6 +21,7 @@ import type {
 } from '../lib/types'
 import {
   CaveatBanner,
+  ColdStartCard,
   DataQualityPanel,
   EmptyPrompt,
   EmptyState,
@@ -117,7 +118,6 @@ export function AnalysisPanel({
     enabled: Boolean(regionId) && !blocked,
     staleTime: 0,
     refetchInterval: backfillInterval,
-    retry: retryOn,
   })
 
   const analysisEnabled = Boolean(regionId) && !blocked && statusQuery.data?.status === 'ready'
@@ -127,14 +127,12 @@ export function AnalysisPanel({
     queryFn: ({ signal }) => apiGet<TimeseriesResponse>('/analysis/timeseries', canonical, signal),
     enabled: analysisEnabled,
     refetchInterval: prepareInterval,
-    retry: retryOn,
   })
   const summaryQuery = useQuery({
     queryKey: QUERY_KEYS.summary(canonical),
     queryFn: ({ signal }) => apiGet<SummaryResponse>('/analysis/summary', canonical, signal),
     enabled: analysisEnabled,
     refetchInterval: prepareInterval,
-    retry: retryOn,
   })
   const eventsQuery = useQuery({
     queryKey: QUERY_KEYS.events(canonical, page),
@@ -146,7 +144,6 @@ export function AnalysisPanel({
       ),
     enabled: analysisEnabled,
     refetchInterval: prepareInterval,
-    retry: retryOn,
     placeholderData: keepPreviousData,
   })
 
@@ -208,6 +205,9 @@ export function AnalysisPanel({
           secondaryLabel="Choose a region"
         />
       )
+    }
+    if (isColdStartError(error)) {
+      return <ColdStartCard onRetry={() => void statusQuery.refetch()} />
     }
     return (
       <ErrorCard
@@ -406,6 +406,9 @@ function ErrorState({
         secondaryLabel="Reset to defaults"
       />
     )
+  }
+  if (isColdStartError(error)) {
+    return <ColdStartCard onRetry={onRetry} />
   }
   return (
     <ErrorCard

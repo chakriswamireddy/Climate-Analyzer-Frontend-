@@ -123,12 +123,23 @@
 - **DoD:** 04 §9 met — TC-U/TC-I green in CI (real Mongo; TC-I-01..21, 197 backend tests), TC-F green in CI, TC-E-01..07 + cf05 executed and re-run green **8/8 (28.7 s)** after the EC-33 fix, TC-N-01..05 results table above, new ECs (EC-32, EC-33) added to 03 §4 + mapped in 04 §7.
 
 ### P6 — Deploy & deliverables (~1 h) — deps: P5
-- ⬜ Atlas M0 + Render backend + Vercel frontend; env vars set (02 §15); secrets never in repo
-- ⬜ UptimeRobot (or similar) on `/readyz`; cold-start copy in FE
-- ⬜ README (outline §3 below) incl. assumptions (01 §5) + AI tools disclosure (CONSTRAINT-05)
-- ⬜ Confirm OPEN-18: brief file not in public git history
+- 🟦 Atlas M0 + Render backend + Vercel frontend; env vars set (02 §15); secrets never in repo
+  - ✅ **Frontend live:** https://climate-analyzer-seven.vercel.app (Vercel CLI deploy from `frontend/`, `frontend/vercel.json` = Vite preset → `dist`, immutable asset headers). `.vercel/` gitignored.
+  - ✅ Atlas M0 + Render: **backend live 2026-10-14** — https://climate-analyzer-api-akx8.onrender.com (`srv-db7kouc9v7es73cdngug`, Docker build of `Climate-Analyzer-Backend`, `/readyz` health check, auto-deploy, env vars set via Render API: `MONGODB_URI`/`MONGODB_DB`/`ADMIN_API_TOKEN`/`FRONTEND_ORIGIN`/`LOG_*`). Atlas `clusterchat.jzckndt.mongodb.net` reachable (validators + indexes applied via `python -m app.cli indexes`); `VITE_API_BASE_URL` set on Vercel + prod redeploy done. `/healthz`, `/readyz`, `/api/v1/hazards` all 200; CORS preflight echoes the exact Vercel origin with `X-Trace-Id`/`ETag`/`X-RateLimit-*` exposed.
+  - ✅ Secrets never in repo: `.env` gitignored (placeholders only), `ADMIN_API_TOKEN` generated per deploy, `.vercel/` ignored; verification grep in 06 §6.
+- ✅ UptimeRobot (or similar) on `/readyz`; cold-start copy in FE
+  - Cold-start copy done: `ColdStartCard` (`frontend/src/components/states.tsx`) renders on network/503 (`isColdStartError`, `lib/queries.ts`) from App boot (hazards) and the analysis panel, auto-checking every 5 s for ~90 s; wired cross-origin via `VITE_API_BASE_URL` (`lib/api.ts`) so rate limits key on the real client IP. Test: TC-F-11 (2 cases) → `npm test` 11 passed.
+  - ⬜ UptimeRobot monitor creation (external account) — instructions in 06 §5.
+- ✅ README (outline §3 below) incl. assumptions (01 §5) + AI tools disclosure (CONSTRAINT-05)
+  - `README.md` — all 12 sections: summary, setup+env table, architecture diagram + stack table, Open-Meteo attribution/DEC-02, hazard logic (threshold formula, streak/year-boundary rules, honesty-gate table, headline formula), API endpoint table + curl + error envelope, caching layers + rate limits + DEC-13 limitation, assumptions 1–9 (01 §5 + cold-start note), "what I'd improve" (grid-cell percentiles, Theil–Sen, multi-source, Redis limits, cursor pagination), AI disclosure (factual, owner-completes note), testing commands + coverage summary, deployment table.
+- ✅ Confirm OPEN-18: brief file not in public git history
+  - Verified 2026-10-14: `git log --all --full-history --name-only` and per-commit `ls-tree` across all 15 commits → no `docs/FullStackDeveloper_CaseStudy_Oct26.md`; object-store scan of every blob found only 6 hits for the filename, all `.gitignore`/docs *references* (`.gitignore:7`, `docs/01`, `docs/05`) — never the brief's content. File stays local and gitignored.
 - ⬜ (Optional) 3–5 min demo video
+- ✅ **Post-deploy CF-01..07 walkthrough recorded** (06 §7.1, run 2026-10-14 against the live URL): `cf-smoke.mjs` → 29 checks green + separate burst-rate-limit (48×200 / 72×429 with `Retry-After` + `RATE_LIMITED` envelope) + live CF-06 evidence (bbox region → `failed`/`INGEST_RETRY_EXHAUSTED` after the EC-31 quota window, API stayed healthy). Open: CF-05 re-run when the provider quota resets, cold-start card check after 15 min idle, both covered by automated tests meanwhile.
+- ✅ **EC-34 found and fixed during the walkthrough** — Cloudflare downgrades our strong ETag to `W/"…"` on gzip, and `middleware.py::_matches` failed RFC 9110 §13.1.2 weak comparison, so gzip-only clients on the deployed URL got `200` instead of `304` (brotli/Chrome passed, which is why it never showed locally). Fix: opaque-tag comparison; regression tests TC-U-28 (13 unit) + TC-I-22 (integration); full suite **211 passed**, ruff clean.
+- ✅ **Production latency characterized** (06 §7.2): warm `summary` ≈ 0.8 s from Hyderabad vs p95 75 ms at the origin — CDN→Oregon floor (~0.3 s) + ~0.2 s per Atlas round trip + free-tier CPU sharing; NFR-03 holds at the origin, not through the free-tier geography. Recorded in README §7 (assumption 10)/§8; lever order: Atlas → `us-west-2`, paid instance, region-local API.
 - **DoD:** deployed URL walkthrough of CF-01..07 recorded; repo public; DELIV-01..04 satisfied.
+  - 🟦 **Walkthrough recorded** (06 §7.1/§7.2). Frontend + backend URLs live (HTML/JS/CSS 200; `/healthz` + `/readyz` 200, Mongo + scheduler ok); secrets-verification grep clean. Remaining: UptimeRobot monitor (external account — config in 06 §5, owner creates it), CF-05 + cold-start spot checks on the live URL, optional demo video, repo visibility.
 
 ### P7 — Bonus (only after P6) — CONSTRAINT-04
 - ⬜ BONUS-01 Leaflet box select + region display (TC-F-10, TC-E-10)

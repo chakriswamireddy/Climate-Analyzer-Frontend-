@@ -2,7 +2,7 @@
  * Every branch is a named component so tests can target it directly and no
  * state ever falls through to an implicit undefined render. */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { reportClientError } from '../lib/api'
 import type { FieldError } from '../lib/validation'
 
@@ -121,6 +121,52 @@ export function FatalConfigBanner({ onReload }: { onReload: () => void }) {
       <div className="actions">
         <button type="button" className="btn btn--primary" onClick={onReload}>
           Reload
+        </button>
+      </div>
+    </section>
+  )
+}
+
+const COLD_START_POLL_MS = 5_000
+const COLD_START_MAX_POLLS = 18 // ≈ 90 s of auto-checking before manual-only
+
+/** Free-tier cold start (DEC-14, 05 §P6): the deployed API sleeps after idle, so
+ * the first call can fail to connect or answer 503 for up to ~60 s. Instead of a
+ * dead-end error the UI names what is happening and keeps checking on its own. */
+export function ColdStartCard({ note, onRetry }: { note?: string; onRetry?: () => void }) {
+  const [polls, setPolls] = useState(0)
+  const retryRef = useRef(onRetry)
+  retryRef.current = onRetry
+  const exhausted = polls >= COLD_START_MAX_POLLS
+
+  useEffect(() => {
+    if (exhausted || !retryRef.current) return
+    const timer = setTimeout(() => {
+      setPolls((value) => value + 1)
+      retryRef.current?.()
+    }, COLD_START_POLL_MS)
+    return () => clearTimeout(timer)
+  }, [polls, exhausted])
+
+  return (
+    <section className="card" role="status" data-testid="cold-start-card">
+      <h2>{exhausted ? 'The API is still not answering' : 'Waking up the API…'}</h2>
+      <p>
+        {exhausted
+          ? 'The free-tier service did not respond within 90 s. It may still be starting (cold start) or be temporarily down — you can check again.'
+          : (note ??
+            'This app runs on a free tier, which sleeps after a period of inactivity. The first request can take up to a minute. Checking again automatically…')}
+      </p>
+      <div className="actions">
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setPolls(0)
+            retryRef.current?.()
+          }}
+        >
+          Try again
         </button>
       </div>
     </section>

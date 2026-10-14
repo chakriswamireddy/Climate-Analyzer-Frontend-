@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPost } from './lib/api'
-import { QUERY_KEYS } from './lib/queries'
+import { QUERY_KEYS, isColdStartError } from './lib/queries'
 import {
   DEFAULT_ANALYSIS_PARAMS,
   parseAnalysisParams,
@@ -15,7 +15,7 @@ import { HazardSelector } from './components/HazardSelector'
 import { RangePicker } from './components/RangePicker'
 import { RegionSelector } from './components/RegionSelector'
 import { AnalysisPanel } from './components/AnalysisPanel'
-import { FatalConfigBanner } from './components/states'
+import { ColdStartCard, FatalConfigBanner } from './components/states'
 
 /** App shell: URL params → react-query keys → controls + analysis panel.
  * The query string is the single source of truth for shareable links
@@ -99,7 +99,11 @@ export default function App() {
     return (
       <div className="app">
         <Header />
-        <FatalConfigBanner onReload={() => window.location.reload()} />
+        {isColdStartError(hazardsQuery.error) ? (
+          <ColdStartCard onRetry={() => void hazardsQuery.refetch()} />
+        ) : (
+          <FatalConfigBanner onReload={() => window.location.reload()} />
+        )}
       </div>
     )
   }

@@ -10,6 +10,7 @@ import {
   eventsFixture,
   errorEnvelope,
   makeSeries,
+  regionFixture,
   summaryFixture,
   timeseriesFixture,
 } from './fixtures'
@@ -41,7 +42,7 @@ function analysisUrl(url: URL): string {
   return url.pathname
 }
 
-describe('frontend core (TC-F-01..09)', () => {
+describe('frontend core (TC-F-01..11)', () => {
   it('TC-F-01: defaults come from the server registry', async () => {
     const { calls } = installFetch(standardRoutes())
     renderApp('/')
@@ -255,5 +256,54 @@ describe('frontend core (TC-F-01..09)', () => {
     const eventCalls = callsTo(calls, '/api/v1/analysis/events')
     expect(eventCalls.at(-1)?.url.searchParams.get('page')).toBe('2')
     expect(eventCalls.at(-1)?.url.searchParams.get('page_size')).toBe('25')
+  })
+
+  it('TC-F-11: API cold start (503 on boot) shows the wake-up card, not the fatal banner', async () => {
+    installFetch(
+      standardRoutes({
+        hazards: () => ({
+          status: 503,
+          body: errorEnvelope('SERVICE_UNAVAILABLE', 'Service is starting up', {
+            retryable: true,
+            retryAfter: 5,
+          }),
+        }),
+      }),
+    )
+    renderApp('/', { retry: false })
+
+    expect(await screen.findByTestId('cold-start-card')).toHaveTextContent('Waking up the API')
+    expect(screen.queryByTestId('fatal-banner')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('error-card')).not.toBeInTheDocument()
+  })
+
+  it('TC-F-11: cold start on region status keeps polling and recovers on Retry', async () => {
+    const user = userEvent.setup()
+    let regionCalls = 0
+    installFetch(
+      standardRoutes({
+        region: () => {
+          regionCalls += 1
+          return regionCalls === 1
+            ? {
+                status: 503,
+                body: errorEnvelope('SERVICE_UNAVAILABLE', 'Service is starting up', {
+                  retryable: true,
+                  retryAfter: 5,
+                }),
+              }
+            : { body: regionFixture() }
+        },
+      }),
+    )
+    renderApp(`/?region_id=${REGION_ID}`, { retry: false })
+
+    expect(await screen.findByTestId('cold-start-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('error-card')).not.toBeInTheDocument()
+    expect(regionCalls).toBe(1)
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByTestId('summary-card')).toBeInTheDocument()
+    expect(regionCalls).toBe(2)
   })
 })

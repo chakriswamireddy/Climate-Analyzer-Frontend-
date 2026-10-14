@@ -47,6 +47,12 @@ export class ApiError extends Error {
 
 type Params = Record<string, string | number | boolean | undefined | null>
 
+/** Cross-origin API origin on deploy (Vercel → Render, DEC-14); empty locally so
+ * the Vite proxy and the test fetch mock keep seeing same-origin paths. Browsers
+ * call Render directly rather than through a Vercel rewrite so per-IP rate limits
+ * (DEC-13) key on the real client, not on Vercel's shared egress. */
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+
 export function buildUrl(path: string, params: Params = {}): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -55,7 +61,8 @@ export function buildUrl(path: string, params: Params = {}): string {
   }
   const query = search.toString()
   const base = path.startsWith('/api') || path.startsWith('/healthz') ? path : `/api/v1${path}`
-  return query ? `${base}?${query}` : base
+  const url = `${API_BASE_URL}${base}`
+  return query ? `${url}?${query}` : url
 }
 
 function statusFallbackCode(status: number): string {

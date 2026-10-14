@@ -10,9 +10,9 @@ import {
 import type { MockResult, Responder, Route } from './mockFetch'
 
 export interface RouteOptions {
-  hazards?: MockResult
-  presets?: MockResult
-  region?: MockResult
+  hazards?: MockResult | Responder
+  presets?: MockResult | Responder
+  region?: MockResult | Responder
   timeseries?: MockResult | Responder
   summary?: MockResult | Responder
   events?: MockResult | Responder
@@ -32,15 +32,15 @@ export function standardRoutes(options: RouteOptions = {}): Route[] {
   return [
     {
       match: (url) => url.pathname === '/api/v1/hazards',
-      respond: () => options.hazards ?? { body: hazardsFixture() },
+      respond: (url) => resolve(options.hazards, { body: hazardsFixture() }, url),
     },
     {
       match: (url) => url.pathname === '/api/v1/regions/presets',
-      respond: () => options.presets ?? { body: presetsFixture() },
+      respond: (url) => resolve(options.presets, { body: presetsFixture() }, url),
     },
     {
       match: (url) => url.pathname === `/api/v1/regions/${REGION_ID}`,
-      respond: () => options.region ?? { body: regionFixture() },
+      respond: (url) => resolve(options.region, { body: regionFixture() }, url),
     },
     {
       match: (url) => url.pathname === '/api/v1/analysis/timeseries',
