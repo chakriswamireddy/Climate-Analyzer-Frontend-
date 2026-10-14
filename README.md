@@ -268,7 +268,7 @@ node scripts/bench-read.mjs http://127.0.0.1:8001 60 20 # read latency
 node scripts/burst-limit.mjs http://localhost:8000 500  # rate-limit burst
 ```
 
-Coverage summary: 211 backend tests (unit + integration, TC-U-01..28 and TC-I-01..22), 11 frontend component tests (TC-F-01..11), 8 Playwright flows, an 18-check API smoke in CI, plus TC-N-01..05 (safe external access, 150k-request fuzz with zero unhandled 5xx, p95 read latency 75 ms, exact rate-limit behaviour, provider-outage resilience). Test matrices and IDs: [`docs/04-test-matrices.md`](docs/04-test-matrices.md).
+Coverage summary: 214 backend tests (unit + integration, TC-U-01..28 and TC-I-01..24), 11 frontend component tests (TC-F-01..11), 8 Playwright flows, an 18-check API smoke in CI, plus TC-N-01..05 (safe external access, 150k-request fuzz with zero unhandled 5xx, p95 read latency 75 ms, exact rate-limit behaviour, provider-outage resilience). Test matrices and IDs: [`docs/04-test-matrices.md`](docs/04-test-matrices.md).
 
 ---
 

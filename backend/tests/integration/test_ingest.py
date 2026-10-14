@@ -260,3 +260,41 @@ async def test_fully_future_window_records_honest_noop_success(mongo_db, setting
     assert run["status"] == IngestStatus.SUCCESS.value
     assert run["error"] is None
     assert run["finished_at"] is not None
+
+
+@respx.mock
+async def test_partial_window_extends_coverage_instead_of_shrinking_it(mongo_db, settings) -> None:
+    """EC-36: coverage describes everything stored, not the last window.
+
+    An on-demand run fetches only its own years; deriving coverage from that
+    window replaced the region's 2018–2020 extent with the single year just
+    fetched (found live in P6 right after EC-35 let CF-05 through).
+    """
+    extra_start, extra_end = date(2021, 1, 1), date(2021, 12, 31)
+    payloads = {
+        START.isoformat(): open_meteo_payload(make_readings(START, END)),
+        extra_start.isoformat(): open_meteo_payload(make_readings(extra_start, extra_end)),
+    }
+    route = respx.get(ARCHIVE_URL).mock(
+        side_effect=lambda request: httpx.Response(
+            200, json=payloads[request.url.params["start_date"]]
+        )
+    )
+    region_id, _ = await RegionBuilder(mongo_db).ensure(kind="city", name="Hyderabad", spec=POINT)
+
+    service = _service(mongo_db, settings)
+    try:
+        full = await service.run(region_id, START, END, IngestTrigger.CLI)
+        partial = await service.run(region_id, extra_start, extra_end, IngestTrigger.ON_DEMAND)
+    finally:
+        await service.provider.aclose()
+
+    assert full["status"] == IngestStatus.SUCCESS.value
+    assert partial["status"] == IngestStatus.SUCCESS.value
+    assert route.call_count == 2
+
+    region = await mongo_db["regions"].find_one({"_id": region_id})
+    assert region["coverage"] == {"start_year": 2018, "end_year": 2021, "years": 4}
+    assert await mongo_db["daily_weather"].count_documents({"region_id": region_id}) == (
+        EXPECTED_DAYS + 365
+    )

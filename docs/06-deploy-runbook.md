@@ -17,7 +17,8 @@ Companion to [`05 §2 P6`](./05-security-and-implementation-checklist.md) and [`
 | UptimeRobot on `/readyz` | ⬜ owner action | config below (§5) — owner creates the monitor in their account; README marks it pending |
 | Cold-start copy in FE | ✅ | `ColdStartCard` (`frontend/src/components/states.tsx`), TC-F-11 |
 | CF-01..07 walkthrough | ✅ 2026-10-14 | §7.1 results table + §7.2 latency; `scripts/cf-smoke.mjs <render-url>` → 29 green / 1 env-blocked (EC-31), burst rate-limit 48×200 + 72×429 verified separately |
-| EC-34 ETag weak-comparison fix | ✅ 2026-10-14 | found on the live URL (gzip → `W/"…"` → `200` instead of `304`); `middleware.py::_matches` + TC-U-28/TC-I-22; suite 211 green |
+| EC-34 ETag weak-comparison fix | ✅ 2026-10-14 | found on the live URL (gzip → `W/"…"` → `200` instead of `304`); `middleware.py::_matches` + TC-U-28/TC-I-22; suite 214 green |
+| EC-35 + EC-36 (CF-05 on the live URL) | ✅ 2026-10-14 | current-year window clamped to today (`ingest.run`) + coverage recomputed from stored years (`coverage_extent`); CF-05 now `200` in 8.4 s; TC-I-23/TC-I-24; commits `e6ec488` (backend repo) |
 | README (DELIV-03) | ✅ | [`../README.md`](../README.md) |
 | OPEN-18 brief not in git history | ✅ verified | all 15 commit trees scanned; only `.gitignore`/docs filename references |
 | Secrets never in repo | ✅ | `.env` gitignored, `.env.example` placeholders, `.vercel/` gitignored |
@@ -109,7 +110,7 @@ Record results against CF-01..07 on the deployed URL:
 | 2 | CF-02 preset city | ✅ | search → `POST /regions` → 201 `r_4ff4af333ad67ec1`; repeat POST idempotent (`same=true`); `ready` with coverage 1950–2025 (76 y) |
 | 3 | CF-03 bbox + validation | ✅ | bbox create idempotent; span>10° → 422 V-06; antimeridian → 422 V-16. Grid backfill for `r_c47e7a34fd6c1fec` was **blocked by EC-31** (shared-IP provider quota) and, after 3 attempts, the region went honestly `failed` / `INGEST_RETRY_EXHAUSTED` (EC-32 behaviour observed live). Re-submit when the quota window resets |
 | 4 | CF-04 render + ETag | ✅ | `timeseries`/`summary`/`events` 200, one `data_version`, `events.total` = summary totals, honest headline, ETag → `304`; **EC-34 fix** below |
-| 5 | CF-05 on-demand backfill | ⬜ | needs a range outside coverage *and* a healthy provider window (same EC-31 constraint); locally covered by TC-I-16/CF-05 e2e |
+| 5 | CF-05 on-demand backfill | ✅ 2026-10-14 | `start=2025&end=2026&include_current_year=true` on `r_4ff4af333ad67ec1` → on-demand run → `200` in 8.4 s, `data_version` bumped to `dv_2`, coverage `…–2026`, honest `suppressed_low_coverage` caveat (2026 is 78 % complete). Reached only after **EC-35** (future `end_date` → fatal `400`) and **EC-36** (partial window replaced coverage) were found and fixed from this very check |
 | 6 | CF-06 provider failure | ✅ (observed live) | the bbox region above: `failed` + `INGEST_RETRY_EXHAUSTED` + resubmit guidance, API stayed 200 on `/healthz`/`/readyz` (matches TC-N-05) |
 | 7 | CF-07 empty range | ✅ | 1950–1951 → 200, `totals.events == 0`, `headline_kind: no_change`, zero-filled rows, no `NaN`/`Infinity` |
 | 8 | Cold start | ⬜ | requires ~15 min of idle (Render sleep); FE card covered by TC-F-11 |

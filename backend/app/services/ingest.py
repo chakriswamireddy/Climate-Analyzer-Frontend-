@@ -285,11 +285,6 @@ class IngestService:
         started: float,
     ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
-        coverage = {
-            "start_year": rows[0].year,
-            "end_year": rows[-1].year,
-            "years": len({row.year for row in rows}),
-        }
 
         if output.thresholds is not None:
             # Own transaction *before* the window recompute (docs/02 §13)
@@ -304,7 +299,6 @@ class IngestService:
                     output=output,
                     window=window,
                     data_version=data_version,
-                    coverage=coverage,
                     counts=counts,
                     attempts=attempts,
                     source=source,
@@ -324,7 +318,6 @@ class IngestService:
                 output=output,
                 window=window,
                 data_version=data_version,
-                coverage=coverage,
                 counts=counts,
                 attempts=attempts,
                 source=source,
@@ -343,7 +336,6 @@ class IngestService:
         output: PipelineOutput,
         window: Window,
         data_version: str,
-        coverage: dict[str, int],
         counts: dict[str, int],
         attempts: int,
         source: str,
@@ -354,6 +346,14 @@ class IngestService:
         await self.daily.bulk_upsert(
             region_id, rows, source=source, fetched_at=utcnow(), session=session
         )
+        # EC-36: coverage describes everything stored for the region, so a
+        # partial on-demand window *extends* it instead of replacing it with
+        # the two years the run happened to fetch.
+        coverage = await self.daily.coverage_extent(region_id, session=session) or {
+            "start_year": rows[0].year,
+            "end_year": rows[-1].year,
+            "years": len({row.year for row in rows}),
+        }
         if output.events or output.annual_stats:
             await self.events.replace_window(
                 region_id, self.hazard, window, output.events, session=session

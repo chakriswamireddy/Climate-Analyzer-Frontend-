@@ -100,6 +100,25 @@ class DailyWeatherRepository:
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         self._col = db["daily_weather"]
 
+    async def coverage_extent(self, region_id: str, session: Any = None) -> dict[str, int] | None:
+        """Years actually stored for a region — the ``coverage`` field (EC-36).
+
+        Coverage describes the *whole* stored series: an on-demand run only
+        writes its own window, so deriving coverage from that window alone
+        would shrink 1950–2025 down to whatever the last partial fetch held.
+        One group per distinct year, served by the ``{region_id, year}`` index.
+        """
+        pipeline = [
+            {"$match": {"region_id": region_id}},
+            {"$group": {"_id": "$year"}},
+            {"$sort": {"_id": 1}},
+        ]
+        cursor = self._col.aggregate(pipeline, session=session)
+        years = [int(doc["_id"]) for doc in await cursor.to_list(length=None)]
+        if not years:
+            return None
+        return {"start_year": years[0], "end_year": years[-1], "years": len(years)}
+
     async def bulk_upsert(
         self,
         region_id: str,
