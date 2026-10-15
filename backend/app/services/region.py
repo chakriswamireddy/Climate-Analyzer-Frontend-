@@ -142,9 +142,16 @@ class RegionService:
         start, end = self.initial_window()
         try:
             run_id = await self.runner.reserve(region_id, start, end, trigger)
-        except IngestAlreadyRunning:
-            # A run is already in flight (parallel POST) — the single-flight
-            # index did its job; nothing else to queue (EC-02).
+        except IngestAlreadyRunning as exc:
+            # Single-flight index did its job (EC-02) — but a *stale* running
+            # doc (process restart, deploy) also lands here with no job
+            # started; the sweeper fails it out and requeues. Log so ops can
+            # tell "in progress" from "nothing running" (CF-02).
+            log.warning(
+                "backfill for %s already running (run_id=%s); not re-queued",
+                region_id,
+                exc.run_id,
+            )
             return False
         spawn(
             self.runner.run(region_id, start, end, trigger, run_id=run_id, hazard=HAZARD),

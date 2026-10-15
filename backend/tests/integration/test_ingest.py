@@ -15,7 +15,7 @@ import respx
 
 from app.models.ingest import IngestStatus, IngestTrigger
 from app.models.region import bbox_spec, point_spec
-from app.providers.base import SchemaDriftError
+from app.providers.base import ProviderHttpError, SchemaDriftError
 from app.providers.open_meteo import OpenMeteoProvider
 from app.services.ingest import IngestService
 from app.services.region import RegionBuilder
@@ -298,3 +298,40 @@ async def test_partial_window_extends_coverage_instead_of_shrinking_it(mongo_db,
     assert await mongo_db["daily_weather"].count_documents({"region_id": region_id}) == (
         EXPECTED_DAYS + 365
     )
+
+
+@respx.mock
+async def test_retryable_failure_records_last_error_while_still_backfilling(
+    mongo_db, settings, payload
+) -> None:
+    """CF-02: a retryable failure must not masquerade as healthy progress.
+
+    Docs/02 §14.2 keeps the region ``backfilling`` while retries remain (only
+    a fatal run flips a never-succeeded region to ``failed``), but the failure
+    is recorded on the region as ``last_error`` so the UI can surface it; the
+    next success clears it via ``mark_ready``.
+    """
+    fast = settings.model_copy(update={"provider_max_retries": 0})
+    route = respx.get(ARCHIVE_URL).mock(return_value=httpx.Response(503))
+    region_id, _ = await RegionBuilder(mongo_db).ensure(kind="city", name="Hyderabad", spec=POINT)
+
+    with pytest.raises(ProviderHttpError):
+        await _run(_service(mongo_db, fast), region_id)
+
+    assert route.call_count == 1  # retries disabled for a fast failure
+    region = await mongo_db["regions"].find_one({"_id": region_id})
+    assert region["status"] == "backfilling"
+    assert region["last_error"]["code"] == "PROVIDER_HTTP_ERROR"
+    assert "503" in region["last_error"]["message"]
+    run = await mongo_db["ingest_runs"].find_one({"region_id": region_id})
+    assert run["status"] == IngestStatus.FAILED_RETRYABLE.value
+    assert run["error"]["code"] == "PROVIDER_HTTP_ERROR"
+
+    # the next attempt succeeds and clears the surfaced error
+    respx.get(ARCHIVE_URL).mock(return_value=httpx.Response(200, json=payload))
+    summary = await _run(_service(mongo_db, fast), region_id)
+
+    assert summary["status"] == IngestStatus.SUCCESS.value
+    region = await mongo_db["regions"].find_one({"_id": region_id})
+    assert region["status"] == "ready"
+    assert "last_error" not in region

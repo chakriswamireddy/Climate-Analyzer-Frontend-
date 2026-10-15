@@ -84,6 +84,8 @@
 | TC-I-22 | Weak ETag echo (CDN re-encode) | same GET with `If-None-Match: W/"…"` — the form Cloudflare returns whenever it gzip-encodes our strong `"…"` | 304 + empty body (RFC 9110 §13.1.2 weak comparison); a weak tag for a *different* representation still → 200 (EC-34) |
 | TC-I-23 | Ingest window past the archive horizon | on-demand window `2018-01-01 … Dec 31 of the current year` (clamped to today) and a fully future window `2030` | provider is called with `end_date = today`, never a future date; a fully future window makes **no** provider call, records a `success` run and writes nothing (EC-35) |
 | TC-I-24 | Partial window keeps coverage monotonic | ingest `2018-01-01 … 2020-12-31`, then an on-demand `2021` window | coverage reports `{2018, 2021, 4}` — the union of stored years, never the last window alone (EC-36) |
+| TC-I-25 | Retryable failure stays honest | ingest with 503 (retries off) → `RetryableProviderError`, then a successful re-run | run `failed_retryable` with the error; region stays `backfilling` but carries `last_error=PROVIDER_HTTP_ERROR`; the success clears it and flips to `ready` (EC-37) |
+| TC-I-26 | Status polling never stale | `GET /regions/{id}`, then the same request with its `If-None-Match` | `no-cache, max-age=0` + strong `ETag` (revalidate on every CF-02 poll); matching tag → `304` empty body (EC-37) |
 
 ---
 
@@ -101,6 +103,8 @@
 | TC-F-08 | Stale query abort | rapid range toggles → final charts match final params (no out-of-order) |
 | TC-F-09 | Events pagination controls | page nav updates query; total displayed |
 | TC-F-10 | Map picker (bonus) | drag box → bbox values populated → POST /regions payload correct |
+| TC-F-11 | API cold start (503) | cold-start card, keeps polling, recovers on Retry — never the fatal banner |
+| TC-F-12 | Preparing card (CF-02) | aged `backfilling` region still polls (keyed on first observation, not `created_at`); >2 min → "Still preparing" copy; "Check again" restarts the fast window with feedback; `last_error` surfaced |
 
 ---
 
@@ -180,6 +184,7 @@
 | EC-34 CDN downgrades strong ETag to weak `W/"…"` (P6 fix) | TC-I-22 (`test_etag_304_for_cdn_weak_form`), TC-U-28 (`tests/unit/test_middleware.py`) |
 | EC-35 current-year window reaches past the archive horizon → fatal 400 on CF-05 (P6 fix) | TC-I-23 (`test_window_is_clamped_to_the_archive_horizon`, `test_fully_future_window_records_honest_noop_success`) |
 | EC-36 partial window replaced stored coverage (P6 fix) | TC-I-24 (`test_partial_window_extends_coverage_instead_of_shrinking_it`) |
+| EC-37 preparing card froze / stale status cache / silent retryable failure (P6 fix) | TC-I-25 (`test_retryable_failure_records_last_error_while_still_backfilling`), TC-I-26 (`test_region_status_forces_revalidation_not_stale_cache`), TC-F-11/TC-F-12 (`frontend/src/test/preparing.test.tsx`, 10 tests) |
 
 ---
 

@@ -246,10 +246,14 @@ export function DataQualityPanel({
 export function PreparingCard({
   name,
   note,
+  lastError,
+  pending,
   onRetry,
 }: {
   name?: string
   note?: string
+  lastError?: string | null
+  pending?: boolean
   onRetry?: () => void
 }) {
   return (
@@ -259,9 +263,14 @@ export function PreparingCard({
         {note ??
           'First-time analysis can take ~30–60 s while thresholds and daily rows are computed. You can leave this page — the work continues on the server.'}
       </p>
+      {lastError && (
+        <p className="definition" data-testid="preparing-last-error">
+          <strong>Last attempt failed:</strong> {lastError} — the server retries automatically.
+        </p>
+      )}
       <div className="actions">
-        <button type="button" className="btn" onClick={onRetry}>
-          Check again
+        <button type="button" className="btn" onClick={onRetry} disabled={pending}>
+          {pending ? 'Checking…' : 'Check again'}
         </button>
       </div>
     </section>

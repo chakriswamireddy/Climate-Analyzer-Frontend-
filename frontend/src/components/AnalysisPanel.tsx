@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, apiGet } from '../lib/api'
+import { BACKFILL_POLL_WINDOW_MS, backfillPollMs, lastErrorMessage } from '../lib/backfill'
 import {
   QUERY_KEYS,
   cancelStaleAnalysis,
@@ -44,8 +45,6 @@ import { Methodology } from './Methodology'
 const PAGE_SIZE = 25
 const PREPARE_POLL_MS = 5_000
 const PREPARE_POLL_MAX_FAILURES = 13 // ≈ 60 s of CF-05 polling, then manual
-const BACKFILL_POLL_MS = 5_000
-const BACKFILL_POLL_WINDOW_MS = 120_000 // CF-02: 24 polls = 2 minutes
 
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.message
@@ -66,15 +65,6 @@ function fieldErrorsOf(error: unknown): FieldError[] | undefined {
     ]
   }
   return undefined
-}
-
-/** Region polling while the backfill runs (CF-02 step 5). */
-function backfillInterval(query: { state: { data?: RegionStatusResponse } }): number | false {
-  const data = query.state.data
-  if (!data || data.status !== 'backfilling') return false
-  const created = Date.parse(data.created_at ?? '')
-  const age = Number.isNaN(created) ? 0 : Date.now() - created
-  return age < BACKFILL_POLL_WINDOW_MS ? BACKFILL_POLL_MS : false
 }
 
 function prepareInterval(query: {
@@ -112,13 +102,41 @@ export function AnalysisPanel({
   const blocked = paramErrors.length > 0
   const canonical = useMemo(() => canonicalQuery(params), [params])
 
+  // CF-02 step 5: when *this client* first observed the backfill. Null while
+  // not backfilling; "Check again" clears it to restart the fast window.
+  const backfillObservedAtRef = useRef<number | null>(null)
+  useEffect(() => {
+    backfillObservedAtRef.current = null
+  }, [regionId])
+
+  const backfillInterval = useCallback(
+    (query: { state: { data?: RegionStatusResponse } }): number | false =>
+      backfillPollMs(query.state.data, backfillObservedAtRef.current, Date.now()),
+    [],
+  )
+
   const statusQuery = useQuery({
     queryKey: QUERY_KEYS.region(regionId ?? 'unknown'),
-    queryFn: ({ signal }) => apiGet<RegionStatusResponse>(`/regions/${regionId}`, {}, signal),
+    // `no-cache`: every poll must revalidate with the server — a ready flip
+    // sitting in the HTTP cache delayed the transition by up to 30 s.
+    queryFn: ({ signal }) =>
+      apiGet<RegionStatusResponse>(`/regions/${regionId}`, {}, signal, 'no-cache'),
     enabled: Boolean(regionId) && !blocked,
     staleTime: 0,
     refetchInterval: backfillInterval,
+    // Coming back to the tab must re-check a running backfill — the previous
+    // hard poll cap plus focus-blindness is what left stale preparing cards.
+    refetchOnWindowFocus: (query) => query.state.data?.status === 'backfilling',
   })
+  useEffect(() => {
+    if (statusQuery.data?.status === 'backfilling') {
+      if (backfillObservedAtRef.current === null) {
+        backfillObservedAtRef.current = Date.now()
+      }
+    } else {
+      backfillObservedAtRef.current = null
+    }
+  }, [statusQuery.data])
 
   const analysisEnabled = Boolean(regionId) && !blocked && statusQuery.data?.status === 'ready'
 
@@ -234,8 +252,27 @@ export function AnalysisPanel({
     )
   }
   if (status.status === 'backfilling') {
+    const observedAt = backfillObservedAtRef.current
+    const elapsed = observedAt === null ? 0 : Date.now() - observedAt
+    const slow = elapsed >= BACKFILL_POLL_WINDOW_MS
     return (
-      <PreparingCard name={regionName || undefined} onRetry={() => void statusQuery.refetch()} />
+      <PreparingCard
+        name={regionName || undefined}
+        note={
+          slow
+            ? 'Still preparing — this is taking longer than usual (a large grid or a provider quota can slow the first backfill). The server keeps working; check again any time.'
+            : undefined
+        }
+        lastError={lastErrorMessage(status.last_error)}
+        pending={statusQuery.isFetching}
+        onRetry={() => {
+          // Restart the fast window from *now* (setting null would rely on the
+          // observation effect, which structural sharing can skip when the
+          // refetched payload is deeply equal).
+          backfillObservedAtRef.current = Date.now()
+          void statusQuery.refetch()
+        }}
+      />
     )
   }
 

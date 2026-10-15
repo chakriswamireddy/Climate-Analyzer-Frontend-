@@ -424,7 +424,7 @@ Base: `/api/v1`. JSON only. All responses include `X-Trace-Id`. Times are UTC IS
 | GET | `/regions/presets` | Curated city/state list | none | 60/min | `max-age=86400` |
 | GET | `/regions/search?q=` | Geocode proxy (bounded) | none | 10/min | `max-age=86400` per query |
 | POST | `/regions` | Register region (city/state/bbox) → triggers backfill | none | 10/min | `no-store` |
-| GET | `/regions/{region_id}` | Region status + coverage | none | 60/min | `max-age=30` |
+| GET | `/regions/{region_id}` | Region status + coverage | none | 60/min | `no-cache, max-age=0` (ETag revalidate every CF-02 poll) |
 | GET | `/analysis/timeseries` | Annual series + rolling mean (FR-05/10/12) | none | 60/min | `max-age=300` + ETag |
 | GET | `/analysis/summary` | Headline + trend stats (FR-07/10/12) | none | 60/min | `max-age=300` + ETag |
 | GET | `/analysis/events` | Paginated event list | none | 60/min | `max-age=300` + ETag |

@@ -98,7 +98,13 @@ async function readError(response: Response): Promise<ApiError> {
 
 async function request<T>(
   path: string,
-  init: { method: 'GET' | 'POST'; params?: Params; body?: unknown; signal?: AbortSignal },
+  init: {
+    method: 'GET' | 'POST'
+    params?: Params
+    body?: unknown
+    signal?: AbortSignal
+    cache?: RequestCache
+  },
 ): Promise<T> {
   const controller = new AbortController()
   let timedOut = false
@@ -120,6 +126,7 @@ async function request<T>(
       headers: init.body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: controller.signal,
+      cache: init.cache,
     })
   } catch (cause) {
     if (timedOut) {
@@ -161,8 +168,13 @@ async function request<T>(
   }
 }
 
-export function apiGet<T>(path: string, params: Params = {}, signal?: AbortSignal): Promise<T> {
-  return request<T>(path, { method: 'GET', params, signal })
+export function apiGet<T>(
+  path: string,
+  params: Params = {},
+  signal?: AbortSignal,
+  cache?: RequestCache,
+): Promise<T> {
+  return request<T>(path, { method: 'GET', params, signal, cache })
 }
 
 export function apiPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {

@@ -75,7 +75,11 @@ async def region_status(
     region_id: str = Path(..., pattern=REGION_ID_RE.pattern),
     service: RegionService = Depends(get_region_service),
 ) -> object:
-    return ok(await service.status(region_id), "public, max-age=30")
+    # CF-02 poll target: `no-cache, max-age=0` forces the browser to
+    # revalidate on every 5 s poll (cheap ETag 304) instead of serving a
+    # stale `backfilling` from HTTP cache for up to 30 s after the region
+    # turned ready — the ETag gate needs the `max-age` token to stay on.
+    return ok(await service.status(region_id), "no-cache, max-age=0")
 
 
 __all__ = ["router"]

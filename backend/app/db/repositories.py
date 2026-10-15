@@ -65,6 +65,19 @@ class RegionRepository:
             update.pop("$unset")
         await self._col.update_one({"_id": region_id}, update, session=session)
 
+    async def set_last_error(self, region_id: str, error: dict[str, str]) -> None:
+        """Surface a retryable failure on a still-``backfilling`` region.
+
+        Docs/02 §14.2 keeps the region ``backfilling`` while retries remain
+        (only a fatal run flips a never-succeeded region to ``failed``), but
+        recording the error lets the UI distinguish "working" from "stuck
+        retrying" (CF-02). Cleared by the next ``mark_ready``/``set_status``.
+        """
+        await self._col.update_one(
+            {"_id": region_id},
+            {"$set": {"last_error": error, "updated_at": utcnow()}},
+        )
+
     async def mark_ready(
         self,
         region_id: str,

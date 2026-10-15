@@ -161,6 +161,26 @@ async def test_region_status_404_for_unknown_id(client) -> None:
     assert response.json()["error"]["code"] == "REGION_NOT_FOUND"
 
 
+async def test_region_status_forces_revalidation_not_stale_cache(client, mongo_db) -> None:
+    """CF-02: status polls must revalidate on every use.
+
+    The old ``public, max-age=30`` let the browser answer its own 5 s polls
+    from HTTP cache, so the network was hit only every 30 s and a ready flip
+    could sit unseen for up to 30 s (found live while testing the Mumbai
+    preparing card). ``no-cache, max-age=0`` keeps the ETag/304 fast path
+    while guaranteeing each poll asks the server.
+    """
+    region_id = await seed_region(mongo_db, years=range(2020, 2022))
+    response = await client.get(f"/api/v1/regions/{region_id}")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, max-age=0"
+    assert "etag" in response.headers
+    revalidated = await client.get(
+        f"/api/v1/regions/{region_id}", headers={"If-None-Match": response.headers["etag"]}
+    )
+    assert revalidated.status_code == 304
+
+
 async def test_seed_helper_produces_ready_region(mongo_db) -> None:  # smoke for helpers
     region_id = await seed_region(mongo_db, years=range(1990, 1995), events=3)
     region = await mongo_db["regions"].find_one({"_id": region_id})

@@ -382,7 +382,10 @@ class IngestService:
     ) -> None:
         """Run → terminal status; region → ``failed`` only while it never
         succeeded (docs/02 §14.2: a fatal nightly leaves a ``ready`` region
-        honestly stale rather than hiding good data)."""
+        honestly stale rather than hiding good data). A *retryable* failure
+        keeps the region ``backfilling`` (the sweeper requeues it) but records
+        ``last_error`` so the UI can stop masquerading the stall as progress
+        (CF-02)."""
         payload = {"code": error.code, "message": str(error)[:500]}
         try:
             await self.runs.finish(
@@ -393,12 +396,11 @@ class IngestService:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
             region = await self.regions.get(region_id)
-            if (
-                region is not None
-                and region.get("status") == "backfilling"
-                and status is IngestStatus.FAILED_FATAL
-            ):
-                await self.regions.set_status(region_id, "failed", error=payload)
+            if region is not None and region.get("status") == "backfilling":
+                if status is IngestStatus.FAILED_FATAL:
+                    await self.regions.set_status(region_id, "failed", error=payload)
+                else:
+                    await self.regions.set_last_error(region_id, payload)
         except Exception:  # noqa: BLE001 — must not mask the original error
             log.exception("could not record ingest failure for %s", region_id)
 
